@@ -1,0 +1,13 @@
+import requests
+
+token = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjA1NTc3MjZmYWIxMjMxZmEyZGNjNTcyMWExMDgzZGE2ODBjNGE3M2YiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vY29nbmlmeS1jMTdlMCIsImF1ZCI6ImNvZ25pZnktYzE3ZTAiLCJhdXRoX3RpbWUiOjE3NTkyODA1NzMsInVzZXJfaWQiOiJ2OUNzWVZBaDd4YW1QOHc0MDZSeXVSQzNBc1UyIiwic3ViIjoidjlDc1lWQWg3eGFtUDh3NDA2Unl1UkMzQXNVMiIsImlhdCI6MTc1OTI4MDU3MywiZXhwIjoxNzU5Mjg0MTczLCJlbWFpbCI6ImphbWFkaWdhbEBnbWFpbC5jb20iLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImZpcmViYXNlIjp7ImlkZW50aXRpZXMiOnsiZW1haWwiOlsiamFtYWRpZ2FsQGdtYWlsLmNvbSJdfSwic2lnbl9pbl9wcm92aWRlciI6InBhc3N3b3JkIn19.IM0C2xOs8zhbnoHeJwPaiWaKdrq_UgEm9Seyl7ql0xqRe671xsy6jTgzCnNqNNnz4e-WHGucqe5wFTHVZ-MT4r4j4CnK-chvkRj56lRofoTqwRNWNsQ8ebfm9tOcfloenGB7hMpKeE41sEBcEq9jZs8fFw2KZmdKmhTDTG5EgRKwLSOigfk1asi6cmrCpBqafnRAa0S7lJnH3G5y-yDZuGENYyv3_qNLWqGGqaLAbwbKzLp4k_tCq-BuwjKZb-tltY4E3BMR9-VEmO0UfS2zCr5Y2QxKkL1et3aICk0fn55Ckww8bsVD9pMYMcWLvQ9WYugZWidZXHeWhmKbGb29oA"
+
+def test_ping():
+    headers = {
+        'authorization': token
+    }
+    response = requests.post("http://127.0.0.1:8000/ping", headers=headers)
+    
+    return response.text
+
+print(test_ping())
