@@ -2,69 +2,122 @@ name: Pinger
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes
+    - cron: "*/5 * * * *"   # every 5 minutes
   workflow_dispatch:         # allow manual runs
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping backend to prevent sleep
+      - name: Ping backend with retry on failure
         env:
           URL: https://cognify-backend-dymx.onrender.com/
+          MAX_RETRIES: 5
+          RETRY_DELAY: 30
         run: |
           echo "=================================================="
-          echo "🔔 PING ATTEMPT STARTED"
-          echo "📅 Current time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "🔔 PING CYCLE STARTED"
+          echo "📅 Initial attempt time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo "🌐 Target URL: $URL"
+          echo "🔄 Max retries: $MAX_RETRIES"
+          echo "⏱️  Retry delay: ${RETRY_DELAY}s"
           echo "=================================================="
           echo ""
           
-          # Record start time
-          START_TIME=$(date +%s)
+          ATTEMPT=1
+          SUCCESS=false
           
-          # Ping the server
-          echo "⏳ Sending request..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}" "$URL" --max-time 30)
-          
-          # Parse response
-          STATUS=$(echo $RESPONSE | cut -d'|' -f1)
-          TIME_TAKEN=$(echo $RESPONSE | cut -d'|' -f2)
-          
-          echo ""
-          echo "=================================================="
-          echo "📡 RESPONSE RECEIVED"
-          echo "Status Code: $STATUS"
-          echo "Response Time: ${TIME_TAKEN}s"
-          echo "📅 Completed at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "=================================================="
-          echo ""
-          
-          # Check if server is alive
-          if [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 404 ] || [ "$STATUS" -eq 307 ]; then
-            echo "✅ SUCCESS: Server is AWAKE and responding!"
-            echo "   This ping will keep the server alive for ~15 minutes"
-            echo "   Next ping scheduled in 12 minutes"
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🎯 ATTEMPT #$ATTEMPT of $MAX_RETRIES"
+            echo "📅 Time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Record start time for this attempt
+            START_TIME=$(date +%s)
+            
+            # Ping the server
+            echo "⏳ Sending request..."
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}" "$URL" --max-time 30 2>&1)
+            CURL_EXIT_CODE=$?
+            
+            # Parse response
+            STATUS=$(echo $RESPONSE | cut -d'|' -f1)
+            TIME_TAKEN=$(echo $RESPONSE | cut -d'|' -f2)
+            
             echo ""
-            echo "⏱️  TIMING INFO:"
-            echo "   - Current interval: 12 minutes"
-            echo "   - Server stays alive: ~15 minutes after last request"
-            echo "   - Safety buffer: 3 minutes"
+            echo "📊 RESPONSE DETAILS:"
+            echo "   Status Code: $STATUS"
+            echo "   Response Time: ${TIME_TAKEN}s"
+            echo "   Curl Exit Code: $CURL_EXIT_CODE"
+            echo ""
+            
+            # Check if server is alive
+            if [ "$CURL_EXIT_CODE" -eq 0 ] && { [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 404 ] || [ "$STATUS" -eq 307 ]; }; then
+              echo "✅ SUCCESS: Server is AWAKE and responding!"
+              echo ""
+              echo "📈 STATISTICS:"
+              echo "   - Attempts needed: $ATTEMPT"
+              echo "   - Total time: $(($(date +%s) - START_TIME))s"
+              echo "   - Server status: HEALTHY"
+              echo ""
+              echo "⏱️  TIMING INFO:"
+              echo "   - Current interval: 5 minutes"
+              echo "   - Server stays alive: ~15 minutes after this ping"
+              echo "   - Safety buffer: 10 minutes"
+              echo "   - Next scheduled ping: 5 minutes from now"
+              SUCCESS=true
+              break
+              
+            elif [ "$STATUS" -eq 000 ] || [ -z "$STATUS" ] || [ "$CURL_EXIT_CODE" -ne 0 ]; then
+              echo "❌ FAILURE: Server NOT responding"
+              echo "   Possible reasons:"
+              echo "   - Server is in cold start (waking up)"
+              echo "   - Server is completely asleep"
+              echo "   - Network timeout"
+              echo ""
+              
+              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+                echo "🔄 RETRY SCHEDULED"
+                echo "   Waiting ${RETRY_DELAY}s before attempt #$((ATTEMPT + 1))..."
+                echo "   Reason: Give server time to wake up from cold start"
+                echo ""
+                sleep $RETRY_DELAY
+                ATTEMPT=$((ATTEMPT + 1))
+              else
+                echo "⛔ MAX RETRIES REACHED"
+                echo "   Failed after $MAX_RETRIES attempts"
+                echo "   Server may be down or experiencing issues"
+                echo ""
+                break
+              fi
+              
+            else
+              echo "⚠️  WARNING: Unexpected status code $STATUS"
+              echo "   But server responded, so it's awake!"
+              SUCCESS=true
+              break
+            fi
+          done
+          
+          echo ""
+          echo "=================================================="
+          echo "📋 PING CYCLE SUMMARY"
+          echo "=================================================="
+          echo "Status: $([ "$SUCCESS" = true ] && echo "✅ SUCCESS" || echo "❌ FAILED")"
+          echo "Total Attempts: $ATTEMPT"
+          echo "Completed at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "=================================================="
+          echo ""
+          
+          # Exit with appropriate code
+          if [ "$SUCCESS" = true ]; then
+            echo "🎉 Server is alive and will stay awake!"
+            echo "   Next ping in 5 minutes to maintain uptime"
             exit 0
-          elif [ "$STATUS" -eq 000 ] || [ -z "$STATUS" ]; then
-            echo "❌ FAILURE: Server is NOT responding (timeout or connection failed)"
-            echo "   This might mean:"
-            echo "   - Server is sleeping/cold start needed"
-            echo "   - Server is down"
-            echo "   - Network issue"
-            echo ""
-            echo "⚠️  ACTION REQUIRED:"
-            echo "   If this happens frequently, reduce the interval to 10 minutes"
-            echo "   Edit cron: '*/10 * * * *' in the workflow file"
-            exit 1
           else
-            echo "⚠️  WARNING: Unexpected status code $STATUS"
-            echo "   Server responded but with unexpected code"
-            echo "   This still counts as server being awake!"
-            exit 0
+            echo "💔 Unable to wake server after $MAX_RETRIES attempts"
+            echo "   Manual intervention may be required"
+            echo "   Check Render dashboard for server status"
+            exit 1
           fi
