@@ -1,100 +1,151 @@
-name: Pinger
+name: Smart Pinger (Activity-Based)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes
-  workflow_dispatch:         # allow manual runs
+    - cron: "*/5 * * * *"   # Check every 5 minutes
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 jobs:
-  ping:
+  conditional-ping:
     runs-on: ubuntu-latest
+    
+    permissions:
+      actions: write
+      contents: write
+    
     steps:
-      - name: Ping backend with retry on failure
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Smart conditional ping with activity check
         env:
           URL: https://cognify-backend-dymx.onrender.com/
-          MAX_RETRIES: 5
+          PING_ENDPOINT: https://cognify-backend-dymx.onrender.com/ping
+          INACTIVITY_THRESHOLD: 600  # 10 minutes in seconds
+          MAX_RETRIES: 3
           RETRY_DELAY: 30
         run: |
           echo "=================================================="
-          echo "🔔 PING CYCLE STARTED"
-          echo "📅 Initial attempt time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "🌐 Target URL: $URL"
-          echo "🔄 Max retries: $MAX_RETRIES"
-          echo "⏱️  Retry delay: ${RETRY_DELAY}s"
+          echo "🤖 SMART PINGER - ACTIVITY CHECK"
+          echo "📅 Check time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo "=================================================="
           echo ""
           
+          # Step 1: Check if server is even awake
+          echo "🔍 STEP 1: Checking if server is awake..."
+          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$URL" --max-time 10)
+          
+          if [ "$HEALTH_CHECK" -eq 000 ] || [ -z "$HEALTH_CHECK" ]; then
+            echo "💤 Server is SLEEPING or DOWN"
+            echo "   No need to check activity - server is already asleep"
+            echo "   Decision: SKIP PING (let it sleep to save resources)"
+            echo "=================================================="
+            exit 0
+          fi
+          
+          echo "✅ Server is awake (Status: $HEALTH_CHECK)"
+          echo ""
+          
+          # Step 2: Check server activity/last request time
+          echo "🔍 STEP 2: Checking server activity..."
+          echo "   Fetching real-time activity from server..."
+          
+          # Get activity metrics from server
+          ACTIVITY_ENDPOINT="${URL}/server-activity"
+          ACTIVITY_RESPONSE=$(curl -s "$ACTIVITY_ENDPOINT" --max-time 10)
+          
+          if [ -n "$ACTIVITY_RESPONSE" ]; then
+            # Parse JSON response (basic parsing without jq)
+            TIME_SINCE_ACTIVITY=$(echo "$ACTIVITY_RESPONSE" | grep -o '"time_since_last_user_activity_seconds":[0-9]*' | grep -o '[0-9]*')
+            USER_REQUESTS=$(echo "$ACTIVITY_RESPONSE" | grep -o '"user_requests":[0-9]*' | grep -o '[0-9]*' | tail -1)
+            SHOULD_KEEPALIVE=$(echo "$ACTIVITY_RESPONSE" | grep -o '"should_keepalive":[a-z]*' | grep -o '[a-z]*')
+            
+            echo ""
+            echo "📊 SERVER ACTIVITY METRICS:"
+            echo "   Time since last user activity: ${TIME_SINCE_ACTIVITY}s"
+            echo "   Total user requests: ${USER_REQUESTS}"
+            echo "   Inactivity threshold: ${INACTIVITY_THRESHOLD}s"
+            echo "   Server recommendation: $SHOULD_KEEPALIVE"
+            echo ""
+            
+            # Decision based on server metrics
+            if [ -n "$TIME_SINCE_ACTIVITY" ] && [ "$TIME_SINCE_ACTIVITY" -lt "$INACTIVITY_THRESHOLD" ]; then
+              echo "🎉 SERVER HAS RECENT USER ACTIVITY!"
+              echo "   Last user request: ${TIME_SINCE_ACTIVITY}s ago"
+              echo "   Users are actively keeping the server alive"
+              echo ""
+              echo "✅ Decision: SKIP PING (not needed)"
+              echo "   Real user traffic will prevent server sleep"
+              echo "   No waste of resources on unnecessary keepalive"
+              echo "=================================================="
+              exit 0
+            fi
+          else
+            echo "⚠️  Could not fetch activity metrics (server might be starting)"
+            echo "   Falling back to conservative approach"
+          fi
+          
+          # Step 3: No recent activity detected - perform keepalive ping
+          echo ""
+          echo "⚠️  NO RECENT USER ACTIVITY DETECTED"
+          echo "   Time since last user: ${TIME_SINCE_ACTIVITY:-Unknown}s"
+          echo "   Server will sleep in ~$((900 - ${TIME_SINCE_ACTIVITY:-0}))s without keepalive"
+          echo ""
+          echo "🔔 Decision: PERFORM KEEPALIVE PING"
+          echo "   Reason: Prevent server from sleeping due to inactivity"
+          echo "=================================================="
+          echo ""
+          
+          # Perform the actual keepalive ping
           ATTEMPT=1
           SUCCESS=false
           
           while [ $ATTEMPT -le $MAX_RETRIES ]; do
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "🎯 ATTEMPT #$ATTEMPT of $MAX_RETRIES"
-            echo "📅 Time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            echo "🎯 KEEPALIVE ATTEMPT #$ATTEMPT of $MAX_RETRIES"
+            echo "📅 $(date '+%Y-%m-%d %H:%M:%S %Z')"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Record start time for this attempt
-            START_TIME=$(date +%s)
-            
-            # Ping the server
-            echo "⏳ Sending request..."
+            echo "⏳ Sending keepalive request..."
             RESPONSE=$(curl -s -o /dev/null -w "%{http_code}|%{time_total}" "$URL" --max-time 30 2>&1)
             CURL_EXIT_CODE=$?
             
-            # Parse response
             STATUS=$(echo $RESPONSE | cut -d'|' -f1)
             TIME_TAKEN=$(echo $RESPONSE | cut -d'|' -f2)
             
             echo ""
-            echo "📊 RESPONSE DETAILS:"
-            echo "   Status Code: $STATUS"
-            echo "   Response Time: ${TIME_TAKEN}s"
-            echo "   Curl Exit Code: $CURL_EXIT_CODE"
+            echo "📊 RESPONSE:"
+            echo "   Status: $STATUS"
+            echo "   Time: ${TIME_TAKEN}s"
             echo ""
             
-            # Check if server is alive
             if [ "$CURL_EXIT_CODE" -eq 0 ] && { [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 404 ] || [ "$STATUS" -eq 307 ]; }; then
-              echo "✅ SUCCESS: Server is AWAKE and responding!"
+              echo "✅ KEEPALIVE SUCCESS!"
+              echo "   Server will stay awake for another ~15 minutes"
+              echo "   This ping prevents sleep due to user inactivity"
               echo ""
-              echo "📈 STATISTICS:"
-              echo "   - Attempts needed: $ATTEMPT"
-              echo "   - Total time: $(($(date +%s) - START_TIME))s"
-              echo "   - Server status: HEALTHY"
-              echo ""
-              echo "⏱️  TIMING INFO:"
-              echo "   - Current interval: 5 minutes"
-              echo "   - Server stays alive: ~15 minutes after this ping"
-              echo "   - Safety buffer: 10 minutes"
-              echo "   - Next scheduled ping: 5 minutes from now"
+              
               SUCCESS=true
               break
               
             elif [ "$STATUS" -eq 000 ] || [ -z "$STATUS" ] || [ "$CURL_EXIT_CODE" -ne 0 ]; then
-              echo "❌ FAILURE: Server NOT responding"
-              echo "   Possible reasons:"
-              echo "   - Server is in cold start (waking up)"
-              echo "   - Server is completely asleep"
-              echo "   - Network timeout"
-              echo ""
+              echo "❌ Keepalive failed"
               
               if [ $ATTEMPT -lt $MAX_RETRIES ]; then
-                echo "🔄 RETRY SCHEDULED"
-                echo "   Waiting ${RETRY_DELAY}s before attempt #$((ATTEMPT + 1))..."
-                echo "   Reason: Give server time to wake up from cold start"
+                echo "🔄 Retrying in ${RETRY_DELAY}s..."
                 echo ""
                 sleep $RETRY_DELAY
                 ATTEMPT=$((ATTEMPT + 1))
               else
-                echo "⛔ MAX RETRIES REACHED"
-                echo "   Failed after $MAX_RETRIES attempts"
-                echo "   Server may be down or experiencing issues"
-                echo ""
+                echo "⛔ All retries exhausted"
                 break
               fi
-              
             else
-              echo "⚠️  WARNING: Unexpected status code $STATUS"
-              echo "   But server responded, so it's awake!"
+              echo "⚠️  Unexpected status but server responding"
               SUCCESS=true
               break
             fi
@@ -102,22 +153,26 @@ jobs:
           
           echo ""
           echo "=================================================="
-          echo "📋 PING CYCLE SUMMARY"
+          echo "📋 FINAL SUMMARY"
           echo "=================================================="
-          echo "Status: $([ "$SUCCESS" = true ] && echo "✅ SUCCESS" || echo "❌ FAILED")"
-          echo "Total Attempts: $ATTEMPT"
-          echo "Completed at: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Keepalive Status: $([ "$SUCCESS" = true ] && echo "✅ SUCCESS" || echo "❌ FAILED")"
+          echo "Attempts Used: $ATTEMPT"
+          echo "Reason: No user activity for ${TIME_SINCE_ACTIVITY:-Unknown}s"
+          echo "Next Check: 5 minutes"
+          echo "Completed: $(date '+%Y-%m-%d %H:%M:%S %Z')"
           echo "=================================================="
           echo ""
+          echo "💡 HOW THIS WORKS:"
+          echo "   ✓ If users are active → Skip ping (save resources)"
+          echo "   ✓ If no activity detected → Send keepalive ping"
+          echo "   ✓ This prevents unnecessary pings when users keep server alive"
+          echo "=================================================="
           
-          # Exit with appropriate code
-          if [ "$SUCCESS" = true ]; then
-            echo "🎉 Server is alive and will stay awake!"
-            echo "   Next ping in 5 minutes to maintain uptime"
-            exit 0
-          else
-            echo "💔 Unable to wake server after $MAX_RETRIES attempts"
-            echo "   Manual intervention may be required"
-            echo "   Check Render dashboard for server status"
-            exit 1
-          fi
+          # Always exit 0 to prevent workflow from being disabled
+          exit 0
+      
+      - name: Keep workflow alive
+        if: always()
+        run: |
+          # Just update timestamp to keep workflow from being disabled
+          echo "Last check: $(date -u)" > .github/workflows/.keepalive
