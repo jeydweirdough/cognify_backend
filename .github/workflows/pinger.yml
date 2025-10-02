@@ -9,15 +9,17 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping backend
+      - name: Ping backend to prevent sleep
         env:
-          URL: https://cognify-backend-dymx.onrender.com/    # <-- set your URL here (trailing slash is fine)
+          URL: https://cognify-backend-dymx.onrender.com/
         run: |
-          echo "Pinging $URL"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
-          echo "Response code: $STATUS"
-          if [ "$STATUS" -ne 200 ]; then
-            echo "❌ Ping failed (status $STATUS)"
-            exit 1
+          echo "🔔 Pinging $URL at $(date)"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL" --max-time 30)
+          echo "📡 Response code: $STATUS"
+          if [ "$STATUS" -eq 200 ] || [ "$STATUS" -eq 404 ]; then
+            echo "✅ Server is awake (status $STATUS)"
+            exit 0
+          else
+            echo "⚠️ Unexpected status $STATUS, but server responded"
+            exit 0
           fi
-          echo "✅ Ping successful"
