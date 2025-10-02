@@ -55,7 +55,7 @@ jobs:
           echo "   Fetching real-time activity from server..."
           
           # Get activity metrics from server
-          ACTIVITY_ENDPOINT="${URL}/server-activity"
+          ACTIVITY_ENDPOINT="${URL}server-activity"
           ACTIVITY_RESPONSE=$(curl -s "$ACTIVITY_ENDPOINT" --max-time 10)
           
           if [ -n "$ACTIVITY_RESPONSE" ]; then
