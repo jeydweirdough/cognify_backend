@@ -85,3 +85,5 @@ functions/dist/
 # =========================
 .DS_Store
 Thumbs.db
+
+.github/workflows/pinger.yml
