@@ -1,3 +1,4 @@
+import json
 import uvicorn
 from fastapi import FastAPI
 import firebase_admin
@@ -33,7 +34,14 @@ app.add_middleware(
 
 # Initialize Firebase Admin SDK
 if not firebase_admin._apps:
-    cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "serviceAccountKey.json"))
+    sa_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+
+    if sa_json:
+        cred = credentials.Certificate(json.loads(sa_json))  # string → dict
+    else:
+        # fallback to local file for local dev
+        cred = credentials.Certificate("serviceAccountKey.json")
+
     firebase_admin.initialize_app(cred)
 
 # Initialize Pyrebase
