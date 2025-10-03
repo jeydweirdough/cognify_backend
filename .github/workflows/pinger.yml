@@ -193,18 +193,27 @@ jobs:
               # Save history
               NEW_TOTAL=$((TOTAL_PINGS + 1))
               
-              cat > "$HISTORY_FILE" << ENDOFFILE
+              cat > "$HISTORY_FILE" << 'ENDOFFILE'
 {
-  "last_success_time": $CURRENT_TIME,
-  "last_response_time": "$TIME_TAKEN",
-  "consecutive_cold_starts": $NEW_COLD_STARTS,
-  "average_cold_start_time": $NEW_AVG,
-  "total_pings": $NEW_TOTAL,
-  "last_status_code": $STATUS,
-  "recommended_interval_minutes": $RECOMMENDED,
-  "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  "last_success_time": LAST_SUCCESS_TIME_PLACEHOLDER,
+  "last_response_time": "TIME_TAKEN_PLACEHOLDER",
+  "consecutive_cold_starts": COLD_STARTS_PLACEHOLDER,
+  "average_cold_start_time": AVG_PLACEHOLDER,
+  "total_pings": TOTAL_PLACEHOLDER,
+  "last_status_code": STATUS_PLACEHOLDER,
+  "recommended_interval_minutes": RECOMMENDED_PLACEHOLDER,
+  "timestamp": "TIMESTAMP_PLACEHOLDER"
 }
 ENDOFFILE
+              
+              sed -i "s/LAST_SUCCESS_TIME_PLACEHOLDER/$CURRENT_TIME/g" "$HISTORY_FILE"
+              sed -i "s/TIME_TAKEN_PLACEHOLDER/$TIME_TAKEN/g" "$HISTORY_FILE"
+              sed -i "s/COLD_STARTS_PLACEHOLDER/$NEW_COLD_STARTS/g" "$HISTORY_FILE"
+              sed -i "s/AVG_PLACEHOLDER/$NEW_AVG/g" "$HISTORY_FILE"
+              sed -i "s/TOTAL_PLACEHOLDER/$NEW_TOTAL/g" "$HISTORY_FILE"
+              sed -i "s/STATUS_PLACEHOLDER/$STATUS/g" "$HISTORY_FILE"
+              sed -i "s/RECOMMENDED_PLACEHOLDER/$RECOMMENDED/g" "$HISTORY_FILE"
+              sed -i "s/TIMESTAMP_PLACEHOLDER/$(date -u '+%Y-%m-%d %H:%M:%S UTC')/g" "$HISTORY_FILE"
               
               echo "💾 History saved"
               SUCCESS=true
@@ -221,19 +230,25 @@ ENDOFFILE
                 echo "⛔ Max retries"
                 
                 NEW_TOTAL=$((TOTAL_PINGS + 1))
-                cat > "$HISTORY_FILE" << ENDOFFILE
+                cat > "$HISTORY_FILE" << 'ENDOFFILE'
 {
-  "last_success_time": $LAST_SUCCESS_TIME,
+  "last_success_time": LAST_SUCCESS_TIME_PLACEHOLDER,
   "last_response_time": "FAILED",
-  "consecutive_cold_starts": $CONSECUTIVE_COLD_STARTS,
-  "average_cold_start_time": $AVERAGE_COLD_START_TIME,
-  "total_pings": $NEW_TOTAL,
+  "consecutive_cold_starts": COLD_STARTS_PLACEHOLDER,
+  "average_cold_start_time": AVG_PLACEHOLDER,
+  "total_pings": TOTAL_PLACEHOLDER,
   "last_status_code": 0,
   "recommended_interval_minutes": 4,
-  "timestamp": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
+  "timestamp": "TIMESTAMP_PLACEHOLDER",
   "note": "Failed - may need 4-min interval"
 }
 ENDOFFILE
+                
+                sed -i "s/LAST_SUCCESS_TIME_PLACEHOLDER/$LAST_SUCCESS_TIME/g" "$HISTORY_FILE"
+                sed -i "s/COLD_STARTS_PLACEHOLDER/$CONSECUTIVE_COLD_STARTS/g" "$HISTORY_FILE"
+                sed -i "s/AVG_PLACEHOLDER/$AVERAGE_COLD_START_TIME/g" "$HISTORY_FILE"
+                sed -i "s/TOTAL_PLACEHOLDER/$NEW_TOTAL/g" "$HISTORY_FILE"
+                sed -i "s/TIMESTAMP_PLACEHOLDER/$(date -u '+%Y-%m-%d %H:%M:%S UTC')/g" "$HISTORY_FILE"
                 break
               fi
             else
