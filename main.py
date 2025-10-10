@@ -3,13 +3,12 @@ import json
 import os
 import requests
 import uvicorn
-from typing import List, Optional, Dict, Any
+from typing import Dict, Any
 
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Response, Depends
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
 from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
 
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
@@ -18,6 +17,7 @@ from dotenv import load_dotenv
 
 # Import your updated models.py (SignUpSchema includes profile fields)
 from models import SignUpSchema, LoginSchema, UserProfileModel
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
@@ -27,14 +27,26 @@ app = FastAPI(
     docs_url="/"
 )
 
-# Session middleware
+origins = [
+    "http://localhost:5173",  # Vite default dev server
+    "http://localhost:3000",  # Alternative port
+    "https://your-frontend-domain.com",  # Production domain
+    "http://localhost:8000",
+]
+
+# Add SessionMiddleware first
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "change-this-secret"),
-    session_cookie="cognify_session",
-    max_age=1800,
-    same_site="lax",
-    https_only=False  # set True in production
+    secret_key=os.getenv("SESSION_SECRET_KEY", "super-secret-session-key"),
+)
+
+# Then add CORS middleware separately
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # -------------------------
@@ -52,18 +64,6 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # -------------------------
-# OAuth setup (Google)
-# -------------------------
-oauth = OAuth()
-oauth.register(
-    name="google",
-    client_id=os.getenv("GOOGLE_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
-
-# -------------------------
 # Firebase REST helpers
 # -------------------------
 FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY")
@@ -78,19 +78,6 @@ def firebase_login_with_email(email: str, password: str) -> Dict[str, Any]:
     data = resp.json()
     if resp.status_code != 200:
         msg = data.get("error", {}).get("message", "Login failed")
-        raise HTTPException(status_code=400, detail=msg)
-    return data
-
-
-def firebase_login_with_custom_token(custom_token: str) -> Dict[str, Any]:
-    if not FIREBASE_API_KEY:
-        raise RuntimeError("FIREBASE_API_KEY not set")
-    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={FIREBASE_API_KEY}"
-    payload = {"token": custom_token, "returnSecureToken": True}
-    resp = requests.post(url, json=payload, timeout=10)
-    data = resp.json()
-    if resp.status_code != 200:
-        msg = data.get("error", {}).get("message", "Custom token exchange failed")
         raise HTTPException(status_code=400, detail=msg)
     return data
 
@@ -112,6 +99,20 @@ def create_profile_for_uid(uid: str, signup: SignUpSchema) -> UserProfileModel:
     db.collection("user_profiles").document(uid).set(profile.to_dict())
     return profile
 
+# -------------------------
+# Verify Firebase ID Token
+# -------------------------
+def verify_firebase_token(request: Request):
+    auth_header = request.headers.get("authorization")
+    if not auth_header:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+
+    try:
+        token = auth_header.split(" ")[1]
+        decoded = auth.verify_id_token(token)
+        return decoded
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # -------------------------
 # AUTH ROUTES
@@ -141,15 +142,11 @@ async def signup_page(user_data: SignUpSchema):
 
 @app.post("/login")
 async def login_page(user_data: LoginSchema):
-    """
-    Login using Firebase REST API. Return idToken, refreshToken, uid, and profile (if exists).
-    (Frontend should handle storing tokens; backend can verify idToken for protected routes.)
-    """
     try:
         creds = firebase_login_with_email(user_data.email, user_data.password)
         uid = creds.get("localId")
 
-        # fetch profile doc (doc id == uid)
+        # Fetch user profile
         profile_doc = None
         if uid:
             doc_snap = db.collection("user_profiles").document(uid).get()
@@ -157,139 +154,85 @@ async def login_page(user_data: LoginSchema):
                 profile_doc = doc_snap.to_dict()
                 profile_doc["id"] = doc_snap.id
 
-        return JSONResponse(
+        # Build the JSONResponse FIRST
+        resp = JSONResponse(
             content={
                 "token": creds["idToken"],
-                "refreshToken": creds["refreshToken"],
+                "email": creds["email"],
                 "uid": uid,
                 "profile": profile_doc,
                 "message": "Login successful",
             },
             status_code=200,
         )
-    except HTTPException:
-        raise
+
+        # Then attach cookie directly to it
+        resp.set_cookie(
+            key="refresh_token",
+            value=creds["refreshToken"],
+            httponly=True,
+            secure=False,  # True only when using HTTPS
+            samesite="lax",
+            max_age=60 * 60 * 24 * 7,
+        )
+
+        return resp
+
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/logout")
-async def logout_page(request: Request):
-    jwt = request.headers.get("authorization")
-    if not jwt:
-        raise HTTPException(status_code=401, detail="No authorization token provided")
-    try:
-        user = auth.verify_id_token(jwt)
-        auth.revoke_refresh_tokens(user["uid"])
-        return JSONResponse(content={"message": "Successfully logged out. Delete token on client."}, status_code=200)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Logout failed: {str(e)}")
+async def logout_page(request: Request, response: Response):
+    # Try to read the refresh token cookie
+    refresh_token = request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token cookie found")
+
+    # Clear the refresh cookie from the client
+    response = JSONResponse(content={"message": "Logged out successfully"})
+    response.delete_cookie("refresh_token")
+
+    return response
 
 
 @app.post("/refresh")
-async def refresh_token(request: Request):
-    body = await request.json()
-    refresh_token = body.get("refresh_token")
+async def refresh_token(request: Request, response: Response):
+    refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
-        raise HTTPException(status_code=400, detail="No refresh token provided")
+        raise HTTPException(status_code=401, detail="No refresh token cookie")
+
     try:
         url = f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_API_KEY}"
         data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
         res = requests.post(url, data=data, timeout=10)
         if res.status_code != 200:
             raise HTTPException(status_code=400, detail="Invalid refresh token")
-        return JSONResponse(content=res.json(), status_code=200)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
 
+        payload = res.json()
 
-# -------------------------
-# GOOGLE SIGNUP & LOGIN
-# -------------------------
-@app.get("/signup/google")
-async def signup_via_google(request: Request):
-    redirect_uri = request.url_for("google_signup_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+        # Firebase returns a new refresh_token
+        new_refresh = payload.get("refresh_token") or payload.get("refreshToken")
+        new_id_token = payload.get("id_token") or payload.get("idToken")
 
-
-@app.get("/signup/google/callback", name="google_signup_callback")
-async def google_signup_callback(request: Request):
-    """
-    Signup with Google: create Auth user and Firestore profile (if not exists).
-    """
-    try:
-        token = await oauth.google.authorize_access_token(request)
-        user_info = token.get("userinfo")
-        if not user_info or not user_info.get("email"):
-            raise HTTPException(status_code=400, detail="Google account missing email")
-
-        email = user_info["email"]
-        name = user_info.get("name")
-        picture = user_info.get("picture")
-
-        try:
-            # if exists in Firebase, surface error
-            auth.get_user_by_email(email)
-            raise HTTPException(status_code=400, detail="Account already exists. Please login instead.")
-        except auth.UserNotFoundError:
-            fb_user = auth.create_user(email=email, display_name=name, photo_url=picture, email_verified=True)
-            # create profile doc with same uid
-            profile = UserProfileModel(id=fb_user.uid, user_id=fb_user.uid, nickname=name)
-            db.collection("user_profiles").document(fb_user.uid).set(profile.to_dict())
-
-        return JSONResponse(content={"message": "Google signup successful", "email": email}, status_code=201)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/login/google")
-async def login_via_google(request: Request):
-    redirect_uri = request.url_for("google_login_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
-
-
-@app.get("/login/google/callback", name="google_login_callback")
-async def google_login_callback(request: Request):
-    """
-    Google login: require pre-existing Firebase user (signup first).
-    Exchange custom token and return profile.
-    """
-    try:
-        token = await oauth.google.authorize_access_token(request)
-        user_info = token.get("userinfo")
-        if not user_info or not user_info.get("email"):
-            raise HTTPException(status_code=400, detail="Google account missing email")
-        email = user_info["email"]
-
-        try:
-            user = auth.get_user_by_email(email)
-        except auth.UserNotFoundError:
-            raise HTTPException(status_code=403, detail="Account not registered. Please sign up first.")
-
-        custom_token = auth.create_custom_token(user.uid)
-        creds = firebase_login_with_custom_token(custom_token.decode())
-
-        # fetch profile
-        doc_snap = db.collection("user_profiles").document(user.uid).get()
-        profile = doc_snap.to_dict() if doc_snap.exists else None
+        # Update cookie if Firebase issued a new one
+        if new_refresh:
+            response.set_cookie(
+                key="refresh_token",
+                value=new_refresh,
+                httponly=True,
+                secure=False,  # Set True in production
+                samesite="lax",
+                max_age=60 * 60 * 24 * 7,
+            )
 
         return JSONResponse(
-            content={
-                "token": creds["idToken"],
-                "refreshToken": creds.get("refreshToken", ""),
-                "uid": user.uid,
-                "email": email,
-                "profile": profile,
-                "message": "Google login successful",
-            },
+            content={"token": new_id_token, "message": "Token refreshed"},
             status_code=200,
         )
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
 
 
 # -------------------------
@@ -299,7 +242,11 @@ router = APIRouter(prefix="/profiles", tags=["User Profiles"])
 
 
 @router.get("/{user_id}", response_model=UserProfileModel)
-def get_profile(user_id: str):
+def get_profile(user_id: str, decoded_token: dict = Depends(verify_firebase_token)):
+    uid = decoded_token["uid"]
+    if uid != user_id:
+        raise HTTPException(status_code=403, detail="You can only view your own profile")
+
     doc = db.collection("user_profiles").document(user_id).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -327,22 +274,40 @@ def create_profile(user_id: str, payload: UserProfileModel):
 
 
 @router.put("/{user_id}", response_model=dict)
-def update_profile(user_id: str, update_data: dict):
+def update_profile(
+    user_id: str,
+    update_data: dict,
+    decoded_token: dict = Depends(verify_firebase_token),
+):
+    uid = decoded_token["uid"]
+    if uid != user_id:
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
+
     doc_ref = db.collection("user_profiles").document(user_id)
     if not doc_ref.get().exists:
         raise HTTPException(status_code=404, detail="Profile not found")
-    # do not allow changing user_id or id
+
+    # Prevent ID tampering
     update_data.pop("user_id", None)
     update_data.pop("id", None)
+
     doc_ref.update(update_data)
     return {"message": "Profile updated successfully"}
 
 
 @router.delete("/{user_id}", response_model=dict)
-def delete_profile(user_id: str):
+def delete_profile(
+    user_id: str,
+    decoded_token: dict = Depends(verify_firebase_token),
+):
+    uid = decoded_token["uid"]
+    if uid != user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own profile")
+
     doc_ref = db.collection("user_profiles").document(user_id)
     if not doc_ref.get().exists:
         raise HTTPException(status_code=404, detail="Profile not found")
+
     doc_ref.update({"deleted": True})
     return {"message": "Profile soft-deleted successfully"}
 
@@ -357,4 +322,4 @@ def root():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app="main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app="main:app", port=int(os.getenv("PORT", 8000)), reload=True)
