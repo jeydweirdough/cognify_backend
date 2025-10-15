@@ -30,7 +30,7 @@ app = FastAPI(
 origins = [
     "http://localhost:5173",  # Vite default dev server
     "http://localhost:3000",  # Alternative port
-    "https://your-frontend-domain.com",  # Production domain
+    "https://cognify-admins.vercel.app",  # Production domain
     "http://localhost:8000",
 ]
 
