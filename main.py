@@ -15,7 +15,6 @@ from firebase_admin import credentials, auth, firestore
 
 from dotenv import load_dotenv
 
-# Import your updated models.py (SignUpSchema includes profile fields)
 from models import SignUpSchema, LoginSchema, UserProfileModel
 from fastapi.middleware.cors import CORSMiddleware
 
