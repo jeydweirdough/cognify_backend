@@ -240,6 +240,23 @@ async def refresh_token(request: Request, response: Response):
 # -------------------------
 router = APIRouter(prefix="/profiles", tags=["User Profiles"])
 
+# -------------------------
+# Get all user profiles (no auth = admin, for testing)
+# -------------------------
+@router.get("/all", response_model=list[dict])
+def get_all_profiles():
+    try:
+        users_ref = db.collection("user_profiles")
+        docs = users_ref.stream()
+        all_profiles = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            all_profiles.append(data)
+        return all_profiles
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch users: {str(e)}")
+    
 
 @router.get("/{user_id}", response_model=UserProfileModel)
 def get_profile(user_id: str, decoded_token: dict = Depends(verify_firebase_token)):
@@ -251,6 +268,7 @@ def get_profile(user_id: str, decoded_token: dict = Depends(verify_firebase_toke
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Profile not found")
     return UserProfileModel.from_dict(doc.to_dict(), doc.id)
+
 
 
 @router.post("/{user_id}", response_model=dict)
