@@ -15,9 +15,10 @@ from firebase_admin import credentials, auth, firestore
 
 from dotenv import load_dotenv
 
-# Import your updated models.py (SignUpSchema includes profile fields)
 from models import SignUpSchema, LoginSchema, UserProfileModel
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime
+from firebase_admin import auth as firebase_auth
 
 load_dotenv()
 
@@ -154,10 +155,11 @@ async def login_page(user_data: LoginSchema):
                 profile_doc = doc_snap.to_dict()
                 profile_doc["id"] = doc_snap.id
 
-        # Build the JSONResponse FIRST
+        # Build the JSONResponse with tokens in body
         resp = JSONResponse(
             content={
                 "token": creds["idToken"],
+                "refresh_token": creds["refreshToken"],
                 "email": creds["email"],
                 "uid": uid,
                 "profile": profile_doc,
@@ -166,7 +168,7 @@ async def login_page(user_data: LoginSchema):
             status_code=200,
         )
 
-        # Then attach cookie directly to it
+        # Set refresh token as HTTP-only cookie (backup)
         resp.set_cookie(
             key="refresh_token",
             value=creds["refreshToken"],
@@ -183,54 +185,78 @@ async def login_page(user_data: LoginSchema):
 
 
 @app.post("/logout")
-async def logout_page(request: Request, response: Response):
-    # Try to read the refresh token cookie
-    refresh_token = request.cookies.get("refresh_token")
-
-    if not refresh_token:
-        raise HTTPException(status_code=401, detail="No refresh token cookie found")
-
-    # Clear the refresh cookie from the client
-    response = JSONResponse(content={"message": "Logged out successfully"})
-    response.delete_cookie("refresh_token")
-
+async def logout_page(request: Request):
+    # Clear the refresh token cookie
+    response = JSONResponse(content={"message": "Logged out successfully"}, status_code=200)
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
     return response
 
 
 @app.post("/refresh")
-async def refresh_token(request: Request, response: Response):
-    refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=401, detail="No refresh token cookie")
+async def refresh_token(request: Request):
+    """
+    Refresh Firebase ID token using the stored refresh_token (from cookie or body).
+    Returns the same response format as /login for frontend consistency.
+    """
+    body = await request.json() if request.method == "POST" else {}
+    refresh_tok = body.get("refresh_token") or request.cookies.get("refresh_token")
+
+    if not refresh_tok:
+        raise HTTPException(status_code=401, detail="No refresh token provided")
 
     try:
+        # Exchange refresh token for new ID token
         url = f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_API_KEY}"
-        data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+        data = {"grant_type": "refresh_token", "refresh_token": refresh_tok}
         res = requests.post(url, data=data, timeout=10)
+
         if res.status_code != 200:
-            raise HTTPException(status_code=400, detail="Invalid refresh token")
+            raise HTTPException(status_code=400, detail="Invalid or expired refresh token")
 
         payload = res.json()
 
-        # Firebase returns a new refresh_token
         new_refresh = payload.get("refresh_token") or payload.get("refreshToken")
         new_id_token = payload.get("id_token") or payload.get("idToken")
+        user_id = payload.get("user_id") or payload.get("userId")
 
-        # Update cookie if Firebase issued a new one
+        # Retrieve user's profile (so frontend gets full data again)
+        profile_doc = None
+        if user_id:
+            doc_snap = db.collection("user_profiles").document(user_id).get()
+            if doc_snap.exists:
+                profile_doc = doc_snap.to_dict()
+                profile_doc["id"] = doc_snap.id
+
+        response = JSONResponse(
+            content={
+                "token": new_id_token,
+                "refresh_token": new_refresh,
+                "email": payload.get("user_id"),
+                "uid": user_id,
+                "profile": profile_doc,
+                "message": "Token refreshed successfully",
+            },
+            status_code=200,
+        )
+
+        # Refresh the cookie with the new refresh token
         if new_refresh:
             response.set_cookie(
                 key="refresh_token",
                 value=new_refresh,
                 httponly=True,
-                secure=False,  # Set True in production
-                samesite="lax",
+                secure=False,  # Change to True in production (HTTPS)
+                samesite="lax",  # Change to "none" if cross-site
                 max_age=60 * 60 * 24 * 7,
             )
 
-        return JSONResponse(
-            content={"token": new_id_token, "message": "Token refreshed"},
-            status_code=200,
-        )
+        return response
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
 
@@ -240,46 +266,51 @@ async def refresh_token(request: Request, response: Response):
 # -------------------------
 router = APIRouter(prefix="/profiles", tags=["User Profiles"])
 
-# -------------------------
-# Get all user profiles (no auth = admin, for testing)
-# -------------------------
-@router.get("/all", response_model=list[dict])
-def get_all_profiles():
-    try:
-        users_ref = db.collection("user_profiles")
-        docs = users_ref.stream()
-        all_profiles = []
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            all_profiles.append(data)
-        return all_profiles
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch users: {str(e)}")
-    
+def build_login_like_response(uid: str, email: str, token: str, refresh_token: str, profile: dict, message: str):
+    """
+    Helper to return the same structure as the login response.
+    """
+    return {
+        "token": token,
+        "refresh_token": refresh_token,
+        "email": email,
+        "uid": uid,
+        "profile": profile,
+        "message": message,
+    }
 
-@router.get("/{user_id}", response_model=UserProfileModel)
+# Get user profile
+@router.get("/{user_id}", response_model=dict)
 def get_profile(user_id: str, decoded_token: dict = Depends(verify_firebase_token)):
     uid = decoded_token["uid"]
+    email = decoded_token.get("email", None)
     if uid != user_id:
         raise HTTPException(status_code=403, detail="You can only view your own profile")
 
-    doc = db.collection("user_profiles").document(user_id).get()
+    doc_ref = db.collection("user_profiles").document(user_id)
+    doc = doc_ref.get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return UserProfileModel.from_dict(doc.to_dict(), doc.id)
+
+    profile_data = doc.to_dict()
+    profile_data["id"] = user_id
+
+    token = decoded_token.get("token", "")
+    refresh_token = decoded_token.get("refresh_token", "")
+
+    return build_login_like_response(uid, email, token, refresh_token, profile_data, "Profile fetched successfully")
 
 
-
+# Create user profile
 @router.post("/{user_id}", response_model=dict)
-def create_profile(user_id: str, payload: UserProfileModel):
-    """
-    Create a profile for an existing UID. Enforces doc id == user_id.
-    If profile exists, returns 409 conflict.
-    """
-    # ensure path param and body user_id match (or body can omit id/user_id)
-    if payload.user_id and payload.user_id != user_id:
-        raise HTTPException(status_code=400, detail="user_id mismatch between URL and payload")
+def create_profile(user_id: str, payload: UserProfileModel, decoded_token: dict = Depends(verify_firebase_token)):
+    uid = decoded_token["uid"]
+    email = decoded_token.get("email", None)
+    token = decoded_token.get("token", "")
+    refresh_token = decoded_token.get("refresh_token", "")
+
+    if uid != user_id:
+        raise HTTPException(status_code=403, detail="You can only create your own profile")
 
     doc_ref = db.collection("user_profiles").document(user_id)
     if doc_ref.get().exists:
@@ -287,17 +318,21 @@ def create_profile(user_id: str, payload: UserProfileModel):
 
     payload.id = user_id
     payload.user_id = user_id
-    doc_ref.set(payload.to_dict())
-    return {"id": user_id, "message": "Profile created successfully"}
+    data = payload.to_dict()
+    data["deleted"] = False
+    data["updated_at"] = datetime.utcnow().isoformat()
+    doc_ref.set(data)
+
+    return build_login_like_response(uid, email, token, refresh_token, data, "Profile created successfully")
 
 
 @router.put("/{user_id}", response_model=dict)
-def update_profile(
-    user_id: str,
-    update_data: dict,
-    decoded_token: dict = Depends(verify_firebase_token),
-):
+def update_profile(user_id: str, update_data: dict, decoded_token: dict = Depends(verify_firebase_token)):
     uid = decoded_token["uid"]
+    email = decoded_token.get("email", None)
+    token = decoded_token.get("token", "")
+    refresh_token = decoded_token.get("refresh_token", "")
+
     if uid != user_id:
         raise HTTPException(status_code=403, detail="You can only update your own profile")
 
@@ -305,20 +340,37 @@ def update_profile(
     if not doc_ref.get().exists:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # Prevent ID tampering
+    # Remove fields not meant to be updated
     update_data.pop("user_id", None)
     update_data.pop("id", None)
+    update_data["updated_at"] = datetime.utcnow().isoformat()
 
+    # 🔹 If the user wants to change email, update Firebase Auth record
+    if "email" in update_data and update_data["email"] and update_data["email"] != email:
+        try:
+            firebase_auth.update_user(uid, email=update_data["email"])
+            email = update_data["email"]  # keep the new email for the response
+        except firebase_auth.AuthError as e:
+            raise HTTPException(status_code=400, detail=f"Failed to update email: {str(e)}")
+
+    # 🔹 Update Firestore profile data
     doc_ref.update(update_data)
-    return {"message": "Profile updated successfully"}
+
+    # 🔹 Fetch updated Firestore profile
+    updated_profile = doc_ref.get().to_dict()
+    updated_profile["id"] = user_id
+
+    return build_login_like_response(uid, email, token, refresh_token, updated_profile, "Profile updated successfully")
 
 
+# Delete user profile (soft delete)
 @router.delete("/{user_id}", response_model=dict)
-def delete_profile(
-    user_id: str,
-    decoded_token: dict = Depends(verify_firebase_token),
-):
+def delete_profile(user_id: str, decoded_token: dict = Depends(verify_firebase_token)):
     uid = decoded_token["uid"]
+    email = decoded_token.get("email", None)
+    token = decoded_token.get("token", "")
+    refresh_token = decoded_token.get("refresh_token", "")
+
     if uid != user_id:
         raise HTTPException(status_code=403, detail="You can only delete your own profile")
 
@@ -326,8 +378,15 @@ def delete_profile(
     if not doc_ref.get().exists:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    doc_ref.update({"deleted": True})
-    return {"message": "Profile soft-deleted successfully"}
+    doc_ref.update({
+        "deleted": True,
+        "updated_at": datetime.utcnow().isoformat()
+    })
+
+    deleted_profile = doc_ref.get().to_dict()
+    deleted_profile["id"] = user_id
+
+    return build_login_like_response(uid, email, token, refresh_token, deleted_profile, "Profile deleted successfully")
 
 
 app.include_router(router)
