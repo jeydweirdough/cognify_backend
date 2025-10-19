@@ -1,14 +1,16 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from firebase_admin import auth
 import requests
 
-from app.models.user_models import SignUpSchema, LoginSchema
-from app.utils.firebase_utils import firebase_login_with_email, create_profile_for_uid
-from app.core.config import settings
-from app.database.firestore import db
+from models.user_models import SignUpSchema, LoginSchema
+from utils.firebase_utils import firebase_login_with_email, create_profile_for_uid
+from core.config import settings
+from database.firestore import db
 
-router = APIRouter(tags=["Authentication"])
+from core.security import admin_only
+
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/signup")
 async def signup_page(user_data: SignUpSchema):
@@ -24,7 +26,7 @@ async def signup_page(user_data: SignUpSchema):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(admin_only)])
 async def login_page(user_data: LoginSchema):
     try:
         creds = firebase_login_with_email(user_data.email, user_data.password)

@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
-from app.core.config import settings
-from app.routes import auth, profiles
+from core.config import settings
+from routes import auth, profiles
 
 app = FastAPI(
     title="Cognify API",
@@ -31,4 +31,4 @@ def root():
     return {"message": "Cognify API running 🚀"}
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", port=settings.PORT, reload=True)
+    uvicorn.run("main:app", port=settings.PORT, reload=True)

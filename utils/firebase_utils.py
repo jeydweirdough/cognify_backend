@@ -1,8 +1,8 @@
 import requests
 from fastapi import HTTPException
-from app.core.config import settings
-from app.database.firestore import db
-from app.models.user_models import UserProfileModel
+from core.config import settings
+from database.firestore import db
+from models.user_models import UserProfileModel
 
 def firebase_login_with_email(email: str, password: str):
     if not settings.FIREBASE_API_KEY:

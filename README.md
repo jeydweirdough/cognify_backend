@@ -29,12 +29,10 @@ API: `http://localhost:8000`
 ## API Endpoints
 
 **Auth:**
-- `POST /signup` - Register with email/password
-- `POST /login` - Login with email/password
-- `POST /logout` - Revoke tokens
-- `POST /refresh` - Refresh token
-- `GET /signup/google` - Google signup
-- `GET /login/google` - Google login
+- `POST /api/signup` - Register with email/password
+- `POST /api/login` - Login with email/password
+- `POST /api/logout` - Revoke tokens
+- `POST /api/refresh` - Refresh token
 
 **Profiles:**
 - `GET /profiles/{user_id}` - Get profile
