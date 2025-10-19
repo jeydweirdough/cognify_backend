@@ -1,0 +1,1 @@
+from app.core.firebase import db

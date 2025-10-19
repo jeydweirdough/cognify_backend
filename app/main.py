@@ -1,0 +1,34 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+import uvicorn
+
+from app.core.config import settings
+from app.routes import auth, profiles
+
+app = FastAPI(
+    title="Cognify API",
+    description="Cognify backend API",
+    docs_url="/"
+)
+
+# Middleware setup
+app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET_KEY)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Routers
+app.include_router(auth.router)
+app.include_router(profiles.router)
+
+@app.get("/")
+def root():
+    return {"message": "Cognify API running 🚀"}
+
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", port=settings.PORT, reload=True)

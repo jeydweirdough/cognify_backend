@@ -7,8 +7,8 @@ FastAPI backend with Firebase Authentication and Google OAuth.
 ### 1. Install Dependencies
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv env
+source env/bin/activate  # On Windows: env\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -17,11 +17,11 @@ Fix any issues before proceeding.
 ### 2. Start Server
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --port 8000 --reload
 ```
 or
 ```bash
-python main.py
+python -m app.main
 ```
 
 API: `http://localhost:8000`
@@ -54,18 +54,4 @@ curl -X POST http://localhost:8000/signup \
 curl -X POST http://localhost:8000/login \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"Pass123!"}'
-```
-## Project Structure
-
-```
-cognify/
-├── main.py              # FastAPI app & routes
-├── models.py            # Pydantic models
-├── config.py            # Configuration
-├── diagnostics.py       # Setup verification
-├── test.py              # API testing examples
-├── requirements.txt     # Python dependencies
-├── .gitignore           # Git ignore rules
-├── .env                 # Environment variables (create this)
-└── README.md
 ```
