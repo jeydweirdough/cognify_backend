@@ -17,11 +17,11 @@ Fix any issues before proceeding.
 ### 2. Start Server
 
 ```bash
-uvicorn app.main:app --port 8000 --reload
+uvicorn main:app --port 8000 --reload
 ```
 or
 ```bash
-python -m app.main
+python main.py
 ```
 
 API: `http://localhost:8000`
@@ -29,10 +29,10 @@ API: `http://localhost:8000`
 ## API Endpoints
 
 **Auth:**
-- `POST /api/signup` - Register with email/password
-- `POST /api/login` - Login with email/password
-- `POST /api/logout` - Revoke tokens
-- `POST /api/refresh` - Refresh token
+- `POST /auth/signup` - Register with email/password
+- `POST /auth/login` - Login with email/password
+- `POST /auth/logout` - Revoke tokens
+- `POST /auth/refresh` - Refresh token
 
 **Profiles:**
 - `GET /profiles/{user_id}` - Get profile
@@ -44,12 +44,12 @@ API: `http://localhost:8000`
 
 ```bash
 # Signup
-curl -X POST http://localhost:8000/signup \
+curl -X POST http://localhost:8000/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"Pass123!","first_name":"John"}'
 
 # Login
-curl -X POST http://localhost:8000/login \
+curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"Pass123!"}'
 ```
