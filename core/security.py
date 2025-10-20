@@ -1,5 +1,6 @@
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request, status
 from firebase_admin import auth
+from database.firestore import db
 
 def verify_firebase_token(request: Request):
     auth_header = request.headers.get("authorization")
@@ -11,21 +12,28 @@ def verify_firebase_token(request: Request):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-async def admin_only(request: Request):
-    print("\n=== REQUEST INFO ===")
-    print(f"Method: {request.method}")
-    print(f"URL: {request.url}")
-    print("Headers:")
-    for key, value in request.headers.items():
-        print(f"  {key}: {value}")
+async def admin_only(decoded_token: dict = Depends(verify_firebase_token)):
+    """
+    Restricts access to users whose Firestore role document
+    contains designation == 'admin'.
+    """
+    uid = decoded_token.get("uid")
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    # Safely read JSON body
     try:
-        body = await request.json()
-        print("\n=== BODY ===")
-        print(body)
-    except Exception:
-        print("No JSON body or unable to parse body.")
+        user_doc = db.collection("user_profiles").document(uid).get()
+        role_id = user_doc.to_dict().get("role_id")
 
-    print("\n✅ Request verified for admin access\n")
-    return True
+        role_doc = db.collection("roles").document(role_id).get()
+        if not role_doc.exists:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Role is not set properly")
+
+        role_data = role_doc.to_dict()
+        if role_data.get("designation") != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access only")
+
+        return decoded_token  # success → pass user data onward
+
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

@@ -8,8 +8,6 @@ from utils.firebase_utils import firebase_login_with_email, create_profile_for_u
 from core.config import settings
 from database.firestore import db
 
-from core.security import admin_only
-
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/signup")
@@ -26,7 +24,7 @@ async def signup_page(user_data: SignUpSchema):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.post("/login", dependencies=[Depends(admin_only)])
+@router.post("/login")
 async def login_page(user_data: LoginSchema):
     try:
         creds = firebase_login_with_email(user_data.email, user_data.password)
