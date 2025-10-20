@@ -11,8 +11,9 @@ class Settings:
     ALLOWED_ORIGINS = [
         "http://localhost:5173",
         "http://localhost:3000",
-        "https://cognify-admins.vercel.app",
         "http://localhost:8000",
+        "https://cognify-backend.vercel.app",
+        "http://cognify-admins.vercel.app",
     ]
 
 settings = Settings()

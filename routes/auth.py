@@ -1,12 +1,24 @@
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
-from firebase_admin import auth
-import requests
-
-from models.user_models import SignUpSchema, LoginSchema, UserProfileModel
-from utils.firebase_utils import firebase_login_with_email, create_profile_for_uid
-from core.config import settings
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
+from core.security import create_access_token, create_refresh_token, get_password_hash
+from models.user_models import User, SignUpSchema
+from utils.firebase_utils import get_user_by_email, create_user_with_email_and_password
 from database.firestore import db
+import uuid
+from core.firebase import auth
+from core.config import settings
+from models.user_models import UserProfileModel
+from utils.firebase_utils import create_profile_for_uid
+import requests
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+COOKIE_SAMESITE = "lax"
+COOKIE_SECURE = False
+
+if settings.ENVIRONMENT == "production":
+    COOKIE_SAMESITE = "none"
+    COOKIE_SECURE = True
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -38,36 +50,42 @@ async def signup_page(auth_data: SignUpSchema):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/login")
-async def login_page(user_data: LoginSchema):
+async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
+    email = form_data.username
+    password = form_data.password
+
     try:
-        creds = firebase_login_with_email(user_data.email, user_data.password)
-        uid = creds.get("localId")
+        user = auth.sign_in_with_email_and_password(email, password)
+        access_token = create_access_token(data={"sub": user['localId']})
+        refresh_token = create_refresh_token(data={"sub": user['localId']})
 
-        profile_doc = None
-        if uid:
-            doc_snap = db.collection("user_profiles").document(uid).get()
-            if doc_snap.exists:
-                profile_doc = doc_snap.to_dict()
-                profile_doc["id"] = doc_snap.id
-
-        resp = JSONResponse(
-            content={
-                "token": creds["idToken"],
-                "refresh_token": creds["refreshToken"],
-                "message": "Login successful",
-            },
-            status_code=200,
+        # --- MODIFIED: Use dynamic cookie settings ---
+        response.set_cookie(
+            key="refresh_token", 
+            value=refresh_token, 
+            httponly=True, 
+            samesite=COOKIE_SAMESITE, # 👈 CHANGED
+            secure=COOKIE_SECURE       # 👈 CHANGED
         )
-        resp.set_cookie(key="refresh_token", value=creds["refreshToken"], httponly=True, samesite="lax")
-        return resp
+        
+        return {"token": access_token, "refresh_token": refresh_token}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 @router.post("/logout")
-async def logout_page(request: Request):
-    response = JSONResponse(content={"message": "Logged out successfully"}, status_code=200)
-    response.delete_cookie("refresh_token", path="/", httponly=True, samesite="lax")
-    return response
+async def logout(response: Response):
+    # --- MODIFIED: Must MATCH set_cookie parameters EXACTLY ---
+    response.delete_cookie(
+        key="refresh_token", 
+        httponly=True, 
+        samesite=COOKIE_SAMESITE, # 👈 CHANGED
+        secure=COOKIE_SECURE       # 👈 CHANGED
+    )
+    return {"message": "Logout successful"}
 
 @router.post("/refresh")
 async def refresh_token(request: Request):

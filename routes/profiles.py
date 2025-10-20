@@ -27,24 +27,41 @@ def _get_auth_email(uid: str) -> Optional[str]:
 
 @router.get("/all")
 async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["admin"]))):
-    """Admin: view all profiles, ensuring the email matches Firebase."""
+    """Admin: view all profiles, ensuring the email matches Firebase and embedding the role designation."""
     if decoded.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Only admins can view all profiles.")
 
-    def _fetch_profiles():
+    def _fetch_profiles_and_roles():
+        # 1. Fetch all roles first and store them in a dictionary for quick lookup.
+        roles_ref = db.collection("roles")
+        roles_map = {doc.id: doc.to_dict().get("designation", "Unknown") for doc in roles_ref.stream()}
+        
+        # 2. Fetch all user profiles.
         users_ref = db.collection("user_profiles")
         profiles = []
         for doc in users_ref.stream():
             data = doc.to_dict()
             data["id"] = doc.id
+            
+            # 3. Ensure the email from Firebase Auth is the source of truth.
             auth_email = _get_auth_email(doc.id)
             if auth_email:
-                data["email"] = auth_email  # ensure Firestore and Auth are in sync
+                data["email"] = auth_email
+            
+            # 4. Look up the role_id from the profile and get the designation from our map.
+            role_id = data.get("role_id")
+            if role_id in roles_map:
+                # Add the 'role' field with the string designation (e.g., "admin").
+                data["role"] = roles_map[role_id]
+            else:
+                data["role"] = "Not Assigned" # Fallback
+                
             profiles.append(data)
+            
         return profiles
 
-    profiles = await asyncio.to_thread(_fetch_profiles)
-    return profiles
+    profiles_with_roles = await asyncio.to_thread(_fetch_profiles_and_roles)
+    return profiles_with_roles
 
 
 @router.post("/", status_code=201)
