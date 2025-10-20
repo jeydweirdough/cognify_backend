@@ -13,7 +13,7 @@ class Settings:
         "http://localhost:3000",
         "http://localhost:8000",
         "https://cognify-backend.vercel.app",
-        "http://cognify-admins.vercel.app",
+        "https://cognify-admins.vercel.app",
     ]
 
 settings = Settings()
