@@ -1,6 +1,27 @@
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Request, Depends, HTTPException, status
 from firebase_admin import auth
 from database.firestore import db
+import asyncio
+
+async def get_user_role(uid: str) -> str:
+    """Fetch the user's role (designation) from Firestore."""
+    def _fetch_role():
+        user_doc = db.collection("user_profiles").document(uid).get()
+        if not user_doc.exists:
+            raise HTTPException(status_code=404, detail="User profile not found")
+
+        role_id = user_doc.to_dict().get("role_id")
+        if not role_id:
+            raise HTTPException(status_code=403, detail="User role not assigned")
+
+        role_doc = db.collection("roles").document(role_id).get()
+        if not role_doc.exists:
+            raise HTTPException(status_code=403, detail="Role not found")
+
+        return role_doc.to_dict().get("designation", "").lower()
+
+    return await asyncio.to_thread(_fetch_role)
+
 
 def verify_firebase_token(request: Request):
     auth_header = request.headers.get("authorization")
@@ -12,28 +33,42 @@ def verify_firebase_token(request: Request):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-async def admin_only(decoded_token: dict = Depends(verify_firebase_token)):
+
+def allowed_users(roles: list[str]):
     """
-    Restricts access to users whose Firestore role document
-    contains designation == 'admin'.
+    Shortcut dependency to allow only specified roles.
+    Admin always has full access automatically.
+    Supports self-access for non-admin users.
     """
-    uid = decoded_token.get("uid")
-    if not uid:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    async def dependency(
+        decoded: dict = Depends(verify_firebase_token),
+        request: Request = None,
+        user_id: str = None  # route parameter for self-access
+    ):
+        uid = decoded["uid"]
 
-    try:
-        user_doc = db.collection("user_profiles").document(uid).get()
-        role_id = user_doc.to_dict().get("role_id")
+        # Get user role
+        role = await get_user_role(uid)
+        decoded["role"] = role
 
-        role_doc = db.collection("roles").document(role_id).get()
-        if not role_doc.exists:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Role is not set properly")
+        # Admin bypass
+        if role == "admin":
+            return decoded
 
-        role_data = role_doc.to_dict()
-        if role_data.get("designation") != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access only")
+        # Role check
+        if role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{role}' cannot access this resource."
+            )
 
-        return decoded_token  # success → pass user data onward
+        # Self-access check
+        if user_id and uid != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own resource"
+            )
 
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        return decoded
+
+    return dependency

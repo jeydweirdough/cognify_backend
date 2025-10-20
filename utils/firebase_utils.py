@@ -20,6 +20,7 @@ def create_profile_for_uid(uid: str, signup: UserProfileModel):
     profile = UserProfileModel(
         id=uid,
         user_id=uid,
+        email=signup.email,
         first_name=signup.first_name,
         middle_name=signup.middle_name,
         last_name=signup.last_name,

@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from firebase_admin import auth
 import requests
 
-from models.user_models import SignUpSchema, LoginSchema
+from models.user_models import SignUpSchema, LoginSchema, UserProfileModel
 from utils.firebase_utils import firebase_login_with_email, create_profile_for_uid
 from core.config import settings
 from database.firestore import db
@@ -11,16 +11,29 @@ from database.firestore import db
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/signup")
-async def signup_page(user_data: SignUpSchema):
+async def signup_page(auth_data: SignUpSchema):
+    profile_data = UserProfileModel(
+        id="",
+        user_id="",
+        email=auth_data.email,
+        first_name="",
+        middle_name="",
+        last_name="",
+        nickname="",
+        role_id="Tzc78QtZcaVbzFtpHoOL", # only students has the default role for sign up
+    )
+
     try:
-        fb_user = auth.create_user(email=user_data.email, password=user_data.password)
-        profile = create_profile_for_uid(fb_user.uid, user_data)
+        fb_user = auth.create_user(email=auth_data.email, password=auth_data.password)
+        
+        create_profile_for_uid(fb_user.uid, profile_data)
+        
         return JSONResponse(
-            content={"message": "Successfully created user", "uid": fb_user.uid, "profile": profile.to_dict()},
+            content={"message": "Successfully created user", "uid": fb_user.uid, "email": fb_user.email},
             status_code=201,
         )
     except auth.EmailAlreadyExistsError:
-        raise HTTPException(status_code=400, detail=f"Account with email {user_data.email} already exists.")
+        raise HTTPException(status_code=400, detail=f"Account with email {auth_data.email} already exists.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -41,9 +54,6 @@ async def login_page(user_data: LoginSchema):
             content={
                 "token": creds["idToken"],
                 "refresh_token": creds["refreshToken"],
-                "email": creds["email"],
-                "uid": uid,
-                "profile": profile_doc,
                 "message": "Login successful",
             },
             status_code=200,
@@ -63,6 +73,7 @@ async def logout_page(request: Request):
 async def refresh_token(request: Request):
     body = await request.json()
     refresh_tok = body.get("refresh_token") or request.cookies.get("refresh_token")
+    print(refresh_tok)
     if not refresh_tok:
         raise HTTPException(status_code=401, detail="No refresh token provided")
 

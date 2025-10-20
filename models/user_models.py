@@ -4,11 +4,6 @@ from typing import Optional
 class SignUpSchema(BaseModel):
     email: str
     password: str
-    first_name: str
-    middle_name: Optional[str] = None
-    last_name: str
-    nickname: Optional[str] = None
-    role_id: Optional[str] = None
 
 class LoginSchema(BaseModel):
     email: str
@@ -17,9 +12,10 @@ class LoginSchema(BaseModel):
 class UserProfileModel(BaseModel):
     id: str
     user_id: str
-    first_name: str
+    email: str
+    first_name: Optional[str] = None
     middle_name: Optional[str] = None
-    last_name: str
+    last_name: Optional[str] = None
     nickname: Optional[str] = None
     role_id: Optional[str] = None
     deleted: Optional[bool] = False
