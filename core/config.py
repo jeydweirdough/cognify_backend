@@ -7,6 +7,7 @@ class Settings:
     FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY")
     SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "super-secret-session-key")
     PORT = int(os.getenv("PORT", 8000))
+    ENVIRONMENT = os.getenv("ENVIRONMENT")
 
     ALLOWED_ORIGINS = [
         "http://localhost:5173",

@@ -1,17 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.security import OAuth2PasswordRequestForm
-from core.security import create_access_token, create_refresh_token, get_password_hash
-from models.user_models import User, SignUpSchema
-from utils.firebase_utils import get_user_by_email, create_user_with_email_and_password
-from database.firestore import db
-import uuid
-from core.firebase import auth
-from core.config import settings
-from models.user_models import UserProfileModel
-from utils.firebase_utils import create_profile_for_uid
-import requests
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from fastapi import Request
+from firebase_admin import auth
+import requests
+
+from models.user_models import SignUpSchema, LoginSchema, UserProfileModel
+from utils.firebase_utils import firebase_login_with_email, create_profile_for_uid
+from core.config import settings
+from database.firestore import db
+# 1. --- IMPORT get_user_role ---
+from core.security import get_user_role
 
 COOKIE_SAMESITE = "lax"
 COOKIE_SECURE = False
@@ -50,36 +47,58 @@ async def signup_page(auth_data: SignUpSchema):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/login")
-async def login(response: Response, form_data: OAuth2PasswordRequestForm = Depends()):
-    email = form_data.username
-    password = form_data.password
-
+async def login_page(user_data: LoginSchema):
     try:
-        user = auth.sign_in_with_email_and_password(email, password)
-        access_token = create_access_token(data={"sub": user['localId']})
-        refresh_token = create_refresh_token(data={"sub": user['localId']})
+        creds = firebase_login_with_email(user_data.email, user_data.password)
+        uid = creds.get("localId")
 
-        # --- MODIFIED: Use dynamic cookie settings ---
-        response.set_cookie(
-            key="refresh_token", 
-            value=refresh_token, 
-            httponly=True, 
-            samesite=COOKIE_SAMESITE, # 👈 CHANGED
-            secure=COOKIE_SECURE       # 👈 CHANGED
+        profile_doc = None
+        role = "guest"  # Default role
+
+        if uid:
+            # 2. --- FETCH PROFILE AND ROLE ---
+            try:
+                # Use the function from security.py
+                role = await get_user_role(uid) 
+                
+                doc_snap = db.collection("user_profiles").document(uid).get()
+                if doc_snap.exists:
+                    profile_doc = doc_snap.to_dict()
+                    profile_doc["id"] = doc_snap.id
+            except HTTPException as e:
+                print(f"Profile/role fetch failed for {uid}: {e.detail}")
+                # This handles users in Auth but not in profiles
+                if "not found" in str(e.detail).lower():
+                    # Default to 'student' if profile/role is missing
+                    role = "student" 
+                else:
+                    raise e  # Re-raise other errors
+            # --- END OF MODIFICATION ---
+
+        resp = JSONResponse(
+            content={
+                "token": creds["idToken"],
+                "refresh_token": creds["refreshToken"],
+                # 3. --- ADD uid, email, role TO RESPONSE ---
+                "uid": uid,
+                "email": user_data.email,
+                "role": role,  # (e.g., "student", "admin")
+                "profile": profile_doc,
+                # --- END OF MODIFICATION ---
+                "message": "Login successful",
+            },
+            status_code=200,
         )
-        
-        return {"token": access_token, "refresh_token": refresh_token}
+        # This cookie is fine, but the frontend will also save one
+        resp.set_cookie(key="refresh_token", value=creds["refreshToken"], httponly=True, samesite="lax")
+        return resp
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout_page(request: Request):
     # --- MODIFIED: Must MATCH set_cookie parameters EXACTLY ---
-    response.delete_cookie(
+    request.delete_cookie(
         key="refresh_token", 
         httponly=True, 
         samesite=COOKIE_SAMESITE, # 👈 CHANGED
