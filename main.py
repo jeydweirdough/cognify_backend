@@ -4,7 +4,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
 from core.config import settings
-from routes import auth, profiles
+from routes import auth, profiles, status
 
 app = FastAPI(
     title="Cognify API",
@@ -25,6 +25,7 @@ app.add_middleware(
 # Routers
 app.include_router(auth.router)
 app.include_router(profiles.router)
+app.include_router(status.router)
 
 @app.get("/")
 def root():
