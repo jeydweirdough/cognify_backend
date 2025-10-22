@@ -65,47 +65,86 @@ async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["adm
 
 
 @router.post("/", status_code=201)
-async def create_profile(
+async def admin_create_user_and_profile(
     request: Request,
-    profile_data: Dict[str, Any] = Body(...),
-    decoded=Depends(allowed_users(["admin", "student"]))
+    user_data: Dict[str, Any] = Body(...),  # 👈 CHANGED to Dict
+    decoded=Depends(allowed_users(["admin"]))
 ):
-    """Create a user profile with the email taken from Firebase Auth."""
-    caller_role = decoded.get("role")
-    caller_uid = decoded.get("uid")
+    """
+    Admin: Create a new user in Firebase Auth and their corresponding Firestore profile.
+    This is different from public /auth/signup.
+    """
+    
+    # 1. Manually validate required fields from the Dict
+    email = user_data.get("email")
+    password = user_data.get("password")
+    role_id = user_data.get("role_id")
 
-    if not profile_data.get("user_id"):
-        profile_data["user_id"] = caller_uid
+    if not email or not password or not role_id:
+        raise HTTPException(
+            status_code=422, 
+            detail="Missing required fields: 'email', 'password', and 'role_id' are required."
+        )
 
-    if caller_role != "admin" and profile_data["user_id"] != caller_uid:
-        raise HTTPException(status_code=403, detail="Students can only create their own profile.")
+    # 2. Create the user in Firebase Authentication
+    try:
+        fb_user = firebase_auth.create_user(
+            email=email, 
+            password=password
+        )
+    except firebase_auth.EmailAlreadyExistsError:
+        raise HTTPException(status_code=400, detail=f"Account with email {email} already exists.")
+    except Exception as e:
+        # If this fails, we don't need to roll back anything
+        raise HTTPException(status_code=400, detail=f"Failed to create Firebase auth user: {e}")
 
-    uid = profile_data["user_id"]
+    # 3. Prepare the profile document for Firestore
+    now = datetime.utcnow().isoformat()
+    
+    # Copy the user_data dict to create the profile
+    profile_data = user_data.copy()
+    profile_data.pop("password")  # 👈 NEVER save the password in Firestore
 
+    # Add/overwrite essential fields
+    profile_data.update({
+        "id": fb_user.uid,
+        "user_id": fb_user.uid,
+        "created_at": now,
+        "updated_at": now,
+        "deleted": False,
+        "email": fb_user.email  # 👈 Always use the email from Firebase Auth as source of truth
+    })
+
+    # 4. Save the profile document in Firestore (in a thread)
     def _create_doc():
-        col = db.collection("user_profiles")
-        doc_ref = col.document(uid)
-        if doc_ref.get().exists:
-            raise HTTPException(status_code=409, detail="Profile already exists")
+        try:
+            doc_ref = db.collection("user_profiles").document(fb_user.uid)
+            # Use set() here, not merge, since it's a new document
+            doc_ref.set(profile_data) 
+            
+            saved = doc_ref.get().to_dict()
+            saved["id"] = fb_user.uid
+            return saved
+        except Exception as e:
+            # If Firestore fails, we MUST delete the auth user (rollback)
+            try:
+                firebase_auth.delete_user(fb_user.uid)
+            except Exception as rollback_e:
+                # This is bad: we have a "zombie" auth user
+                raise HTTPException(status_code=500, detail=f"Failed to create profile, AND failed to rollback auth user: {rollback_e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create Firestore profile: {e}")
 
-        now = datetime.utcnow().isoformat()
-        profile_data["created_at"] = now
-        profile_data["updated_at"] = now
-        profile_data.setdefault("deleted", False)
-
-        # Always get email from Firebase Auth
-        auth_email = _get_auth_email(uid)
-        if not auth_email:
-            raise HTTPException(status_code=404, detail="Firebase user not found.")
-        profile_data["email"] = auth_email
-
-        doc_ref.set(profile_data)
-        saved = doc_ref.get().to_dict()
-        saved["id"] = uid
-        return saved
-
-    created = await asyncio.to_thread(_create_doc)
-    return build_login_like_response(decoded["uid"], decoded.get("email"), "", "", created, "Profile created successfully")
+    created_profile = await asyncio.to_thread(_create_doc)
+    
+    # Return a consistent response (no tokens, since this is an admin action)
+    return build_login_like_response(
+        fb_user.uid, 
+        fb_user.email, 
+        "", 
+        "", 
+        created_profile, 
+        "Admin successfully created new user and profile"
+    )
 
 
 @router.get("/{user_id}")
