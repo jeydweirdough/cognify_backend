@@ -53,7 +53,7 @@ async def login_page(user_data: LoginSchema):
         uid = creds.get("localId")
 
         profile_doc = None
-        role = "guest"  # Default role
+        role = "student"  # Default role
 
         if uid:
             # 2. --- FETCH PROFILE AND ROLE ---
@@ -79,11 +79,6 @@ async def login_page(user_data: LoginSchema):
             content={
                 "token": creds["idToken"],
                 "refresh_token": creds["refreshToken"],
-                # 3. --- ADD uid, email, role TO RESPONSE ---
-                "uid": uid,
-                "email": user_data.email,
-                "role": role,  # (e.g., "student", "admin")
-                "profile": profile_doc,
                 # --- END OF MODIFICATION ---
                 "message": "Login successful",
             },
