@@ -26,20 +26,36 @@ def _get_auth_email(uid: str) -> Optional[str]:
 
 
 @router.get("/all")
-async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["admin"]))):
-    """Admin: view all profiles, ensuring the email matches Firebase and embedding the role designation."""
-    if decoded.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view all profiles.")
+async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["admin", "faculty_member"]))):
+    """Get profiles based on user role:
+    - Admin: can view all profiles
+    - Faculty: can only view student profiles
+    """
+    caller_role = decoded.get("role")
 
     def _fetch_profiles_and_roles():
         # 1. Fetch all roles first and store them in a dictionary for quick lookup.
         roles_ref = db.collection("roles")
         roles_map = {doc.id: doc.to_dict().get("designation", "Unknown") for doc in roles_ref.stream()}
         
-        # 2. Fetch all user profiles.
+        # Find the student role ID
+        student_role_id = next(
+            (role_id for role_id, designation in roles_map.items() 
+             if designation == "student"), None
+        )
+        
+        # 2. Fetch user profiles based on role
         users_ref = db.collection("user_profiles")
+        
+        # For faculty members, only fetch students
+        if caller_role == "faculty_member":
+            query = users_ref.where("role_id", "==", student_role_id)
+        else:
+            # Admin gets all profiles
+            query = users_ref
+            
         profiles = []
-        for doc in users_ref.stream():
+        for doc in query.stream():
             data = doc.to_dict()
             data["id"] = doc.id
             
@@ -51,13 +67,12 @@ async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["adm
             # 4. Look up the role_id from the profile and get the designation from our map.
             role_id = data.get("role_id")
             if role_id in roles_map:
-                # Add the 'role' field with the string designation (e.g., "admin").
                 data["role"] = roles_map[role_id]
             else:
-                data["role"] = "Not Assigned" # Fallback
+                data["role"] = "Not Assigned"
                 
             profiles.append(data)
-            
+
         return profiles
 
     profiles_with_roles = await asyncio.to_thread(_fetch_profiles_and_roles)
@@ -148,12 +163,12 @@ async def admin_create_user_and_profile(
 
 
 @router.get("/{user_id}")
-async def get_profile(user_id: str, request: Request, decoded=Depends(allowed_users(["admin", "student"]))):
+async def get_profile(user_id: str, request: Request, decoded=Depends(allowed_users(["admin", "student", "faculty_member"]))):
     """User: view own profile, Admin: can view any profile."""
     caller_role = decoded.get("role")
     caller_uid = decoded.get("uid")
 
-    if caller_role != "admin" and user_id != caller_uid:
+    if caller_role != "admin" and caller_role != "faculty_member" and user_id != caller_uid:
         raise HTTPException(status_code=403, detail="You may only view your own profile.")
 
     def _get_doc():
@@ -178,7 +193,7 @@ async def get_profile(user_id: str, request: Request, decoded=Depends(allowed_us
 async def update_profile(
     user_id: str,
     update_data: Dict[str, Any] = Body(...),
-    decoded=Depends(allowed_users(["admin", "student"]))
+    decoded=Depends(allowed_users(["admin", "student", "faculty_member"]))
 ):
     """User: update own profile, Admin: can update any. Also syncs Firebase Auth email."""
     caller_role = decoded.get("role")
