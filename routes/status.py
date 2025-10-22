@@ -27,7 +27,7 @@ async def update_user_status(uid: str, status: str):
     # Run the blocking database call in a separate thread
     await asyncio.to_thread(_update_db)
 
-async def check_inactive_users():
+async def check_offline_users():
     """Mark users as offline if they haven't been seen in 45 seconds"""
     def _check_db():
         try:
@@ -45,16 +45,16 @@ async def check_inactive_users():
                 if hasattr(last_seen, "timestamp"):
                     last_seen = datetime.fromtimestamp(last_seen.timestamp())
                 
-                # If user hasn't been seen recently, mark as offline
+                # If user hasn't sent a heartbeat recently, mark as offline
                 if last_seen and last_seen < cutoff:
                     user.reference.update({
                         "status": "offline",
                         "last_seen": datetime.utcnow()
                     })
-                    print(f"Marked {user.id} as offline (inactive)")
+                    print(f"Marked {user.id} as offline (no recent heartbeat)")
                     
         except Exception as e:
-            print(f"Error checking inactive users: {e}")
+            print(f"Error checking offline status: {e}")
     
     await asyncio.to_thread(_check_db)
 
@@ -66,7 +66,7 @@ async def heartbeat(payload: Dict[str, str]):
         return JSONResponse({"error": "uid required"}, status_code=400)
     
     await update_user_status(uid, "online")
-    await check_inactive_users()  # Clean up any inactive users
+    await check_offline_users()  # Update offline status for users without recent heartbeats
     return JSONResponse({"status": "ok"})
 
 @router.post("/set")
@@ -82,13 +82,13 @@ async def set_status(payload: Dict[str, str]):
         return JSONResponse({"error": "invalid status"}, status_code=400)
     
     await update_user_status(uid, status)
-    await check_inactive_users()  # Clean up any inactive users
+    await check_offline_users()  # Update offline status for users without recent heartbeats
     return JSONResponse({"status": "ok"})
 
 @router.get("/check")
 async def check_status():
-    """Endpoint that runs inactive user check manually"""
-    await check_inactive_users()
+    """Endpoint that runs offline status check manually"""
+    await check_offline_users()
     return JSONResponse({"status": "ok"})
 
 
