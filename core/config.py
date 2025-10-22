@@ -15,6 +15,7 @@ class Settings:
         "http://localhost:8000",
         "https://cognify-backend.vercel.app",
         "https://cognify-admins.vercel.app",
+        "wss://cognify-backend.vercel.app",
     ]
 
 settings = Settings()
