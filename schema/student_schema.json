@@ -1,0 +1,12 @@
+{
+  "student_id": "stu_001",
+  "name": "Maria Dela Cruz",
+  "email": "maria@student.edu.ph",
+  "pre_assessment_score": 45,
+  "ai_confidence": 0.58,
+  "current_module": "mod_2",
+  "progress": {
+    "Theories": 0.65,
+    "Globalization": 0.45
+  }
+}

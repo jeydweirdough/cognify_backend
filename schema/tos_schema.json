@@ -1,0 +1,105 @@
+{
+  "id": "subj_adv_theories_personality",
+  "subject": "Advanced Theories of Personality",
+  "pqf_level": 7,
+  "difficulty_distribution": { "easy": 0.30, "moderate": 0.40, "difficult": 0.30 },
+  "content": [
+    {
+      "title": "Theories",
+      "sub_content": [
+        {
+          "purpose": "Cite major tenets of psychoanalytic, psychodynamic, behavioral, trait, humanistic, existential, biological theories and evolutionary psychology perspectives in understanding personality",
+          "blooms_taxonomy": [{ "remembering": 8 }]
+        },
+        {
+          "purpose": "Clarify tenets of different personality theories",
+          "blooms_taxonomy": [{ "understanding": 8 }]
+        },
+        {
+          "purpose": "Apply tenets and concepts of different theories in explaining human behavior",
+          "blooms_taxonomy": [{ "applying": 13 }]
+        },
+        {
+          "purpose": "Distinguish among the tenets and principles of the different theories of personality",
+          "blooms_taxonomy": [{ "analyzing": 8 }]
+        },
+        {
+          "purpose": "Select the best theory that could explain behavior in specific contexts",
+          "blooms_taxonomy": [{ "evaluating": 3 }]
+        }
+      ],
+      "no_items": 40,
+      "weight_total": 0.40
+    },
+    {
+      "title": "Strengths and Limitations of Theories",
+      "sub_content": [
+        {
+          "purpose": "Identify the strengths and limitations of various personality theories",
+          "blooms_taxonomy": [{ "remembering": 4 }]
+        },
+        {
+          "purpose": "Apply knowledge of strengths and limitations of various theories in explaining behavior",
+          "blooms_taxonomy": [{ "applying": 6 }]
+        },
+        {
+          "purpose": "Evaluate the strengths and limitations of theories in explaining behavior",
+          "blooms_taxonomy": [{ "evaluating": 5 }]
+        }
+      ],
+      "no_items": 15,
+      "weight_total": 0.15
+    },
+    {
+      "title": "Impact of Globalization",
+      "sub_content": [
+        {
+          "purpose": "Explain the key globalization factors that impact personality development",
+          "blooms_taxonomy": [{ "understanding": 4 }]
+        },
+        {
+          "purpose": "Utilize environmental currents in comprehending Filipino personality",
+          "blooms_taxonomy": [{ "applying": 4 }]
+        },
+        {
+          "purpose": "Analyze the effects of globalization on Filipino values and behavior",
+          "blooms_taxonomy": [{ "analyzing": 4 }]
+        },
+        {
+          "purpose": "Evaluate the impact of globalization on Filipino values",
+          "blooms_taxonomy": [{ "evaluating": 4 }]
+        },
+        {
+          "purpose": "Predict Filipino behavior as affected by globalization",
+          "blooms_taxonomy": [{ "creating": 4 }]
+        }
+      ],
+      "no_items": 25,
+      "weight_total": 0.25
+    },
+    {
+      "title": "Sikolohiyang Filipino Concepts and Philippine Traditions and Values",
+      "sub_content": [
+        {
+          "purpose": "Identify major tenets espoused in Sikolohiyang Filipino",
+          "blooms_taxonomy": [{ "remembering": 4 }]
+        },
+        {
+          "purpose": "Explain traditional Filipino values and their relation to personality theories",
+          "blooms_taxonomy": [{ "understanding": 4 }]
+        },
+        {
+          "purpose": "Apply indigenous concepts in understanding Filipino behavior",
+          "blooms_taxonomy": [{ "applying": 6 }]
+        },
+        {
+          "purpose": "Evaluate Filipino values using local and global psychological perspectives",
+          "blooms_taxonomy": [{ "evaluating": 6 }]
+        }
+      ],
+      "no_items": 20,
+      "weight_total": 0.20
+    }
+  ],
+  "total_items": 100
+}

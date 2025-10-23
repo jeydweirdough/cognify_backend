@@ -19,7 +19,9 @@ Fix any issues before proceeding.
 ```bash
 uvicorn main:app --port 8000 --reload
 ```
+
 or
+
 ```bash
 python main.py
 ```
@@ -29,16 +31,47 @@ API: `http://localhost:8000`
 ## API Endpoints
 
 **Auth:**
+
 - `POST /auth/signup` - Register with email/password
 - `POST /auth/login` - Login with email/password
 - `POST /auth/logout` - Revoke tokens
 - `POST /auth/refresh` - Refresh token
 
 **Profiles:**
+
 - `GET /profiles/{user_id}` - Get profile
 - `POST /profiles/{user_id}` - Create profile
 - `PUT /profiles/{user_id}` - Update profile
 - `DELETE /profiles/{user_id}` - Delete profile
+
+## Test Data Management
+
+The project includes tools for managing test data in the Firestore database.
+
+### Generate Test Data
+
+To populate the database with test data:
+
+```bash
+python -m test.cli populate
+```
+
+This will create:
+
+- Test students with randomized profiles
+- Sample modules and activities
+- Test assessments and quizzes
+- Recommendations based on TOS mappings
+
+### Cleanup Test Data
+
+To remove all test data from the database:
+
+```bash
+python -m test.cli cleanup
+```
+
+This safely removes all test documents (prefixed with `test_`) from all collections.
 
 ## Example Request
 

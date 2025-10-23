@@ -1,0 +1,11 @@
+{
+  "recommendation_id": "rec_001",
+  "student_id": "stu_001",
+  "subject_id": "subj_adv_theories_personality",
+  "recommended_topic": "Impact of Globalization",
+  "recommended_module": "mod_3",
+  "bloom_focus": "analyzing",
+  "reason": "Low performance in analysis-based items in Globalization context",
+  "confidence": 0.85,
+  "timestamp": "2025-10-23T16:30:00Z"
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "module_id": "mod_1",
+    "subject_id": "subj_adv_theories_personality",
+    "title": "Overview of Major Personality Theories",
+    "purpose": "Cite major tenets of personality theories",
+    "bloom_level": "remembering",
+    "material_type": "reading",
+    "material_url": "https://cdn.school.edu/modules/theories_overview.pdf",
+    "estimated_time": 45
+  },
+  {
+    "module_id": "mod_2",
+    "subject_id": "subj_adv_theories_personality",
+    "title": "Strengths and Limitations of Personality Theories",
+    "purpose": "Identify strengths and weaknesses of various theories",
+    "bloom_level": "evaluating",
+    "material_type": "activity",
+    "material_url": "https://cdn.school.edu/modules/strengths_weaknesses.pdf",
+    "estimated_time": 40
+  },
+  {
+    "module_id": "mod_3",
+    "subject_id": "subj_adv_theories_personality",
+    "title": "Globalization and Personality",
+    "purpose": "Analyze globalization effects on Filipino behavior",
+    "bloom_level": "analyzing",
+    "material_type": "video",
+    "material_url": "https://cdn.school.edu/modules/globalization_personality.mp4",
+    "estimated_time": 50
+  },
+  {
+    "module_id": "mod_4",
+    "subject_id": "subj_adv_theories_personality",
+    "title": "Sikolohiyang Filipino",
+    "purpose": "Apply indigenous concepts in understanding Filipino behavior",
+    "bloom_level": "applying",
+    "material_type": "reading",
+    "material_url": "https://cdn.school.edu/modules/sikolohiyang_filipino.pdf",
+    "estimated_time": 45
+  }
+]

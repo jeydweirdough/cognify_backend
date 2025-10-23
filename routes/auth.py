@@ -65,6 +65,10 @@ async def login_page(user_data: LoginSchema):
                 if doc_snap.exists:
                     profile_doc = doc_snap.to_dict()
                     profile_doc["id"] = doc_snap.id
+
+                    if doc_snap.to_dict().get("deleted"):
+                        raise HTTPException(status_code=403, detail="User profile is deleted.")
+                    
             except HTTPException as e:
                 print(f"Profile/role fetch failed for {uid}: {e.detail}")
                 # This handles users in Auth but not in profiles

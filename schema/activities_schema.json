@@ -1,0 +1,12 @@
+{
+  "activity_id": "act_001",
+  "student_id": "stu_001",
+  "subject_id": "subj_adv_theories_personality",
+  "activity_type": "assessment",
+  "activity_ref": "assess_adv_personality_mock",
+  "bloom_level": "applying",
+  "score": 80,
+  "completion_rate": 1.0,
+  "duration": 1800,
+  "timestamp": "2025-10-23T15:00:00Z"
+}

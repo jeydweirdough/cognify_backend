@@ -1,0 +1,30 @@
+[
+  {
+    "quiz_id": "quiz_1",
+    "subject_id": "subj_adv_theories_personality",
+    "topic_title": "Theories",
+    "bloom_level": "applying",
+    "question": "How would a behavioral theorist explain a student’s study habits?",
+    "options": [
+      "As inherited traits",
+      "As learned behaviors through reinforcement",
+      "As unconscious motives",
+      "As a result of self-actualization"
+    ],
+    "answer": "As learned behaviors through reinforcement"
+  },
+  {
+    "quiz_id": "quiz_2",
+    "subject_id": "subj_adv_theories_personality",
+    "topic_title": "Impact of Globalization",
+    "bloom_level": "analyzing",
+    "question": "Which situation best shows globalization influencing Filipino personality?",
+    "options": [
+      "A person learns new cultural practices through online communities",
+      "A person avoids new cultural trends",
+      "A person lives in isolation from the media",
+      "A person ignores global information"
+    ],
+    "answer": "A person learns new cultural practices through online communities"
+  }
+]

@@ -1,0 +1,55 @@
+{
+  "assessment_id": "assess_adv_personality_mock",
+  "type": "mock",
+  "subject_id": "subj_adv_theories_personality",
+  "title": "Mock Exam: Advanced Theories of Personality",
+  "instructions": "Answer all questions based on your understanding of the subject.",
+  "total_items": 20,
+  "questions": [
+    {
+      "question_id": "q1",
+      "topic_title": "Theories",
+      "bloom_level": "remembering",
+      "question": "Which of the following focuses on observable behaviors rather than mental processes?",
+      "options": ["Humanistic", "Behavioral", "Psychodynamic", "Existential"],
+      "answer": "Behavioral"
+    },
+    {
+      "question_id": "q2",
+      "topic_title": "Theories",
+      "bloom_level": "understanding",
+      "question": "According to Freud, which component of personality operates on the pleasure principle?",
+      "options": ["Ego", "Id", "Superego", "Conscience"],
+      "answer": "Id"
+    },
+    {
+      "question_id": "q3",
+      "topic_title": "Strengths and Limitations of Theories",
+      "bloom_level": "applying",
+      "question": "A researcher compares behaviorist and humanistic theories to understand motivation. What approach is this?",
+      "options": ["Integration", "Reductionism", "Empiricism", "Conditioning"],
+      "answer": "Integration"
+    },
+    {
+      "question_id": "q4",
+      "topic_title": "Impact of Globalization",
+      "bloom_level": "analyzing",
+      "question": "How does globalization reshape Filipino identity?",
+      "options": [
+        "It creates uniform global traits",
+        "It blends traditional and modern influences",
+        "It erases all Filipino values",
+        "It isolates cultural differences"
+      ],
+      "answer": "It blends traditional and modern influences"
+    },
+    {
+      "question_id": "q5",
+      "topic_title": "Sikolohiyang Filipino",
+      "bloom_level": "evaluating",
+      "question": "Which Filipino value supports community cooperation?",
+      "options": ["Hiya", "Bayanihan", "Pakikisama", "Utang na Loob"],
+      "answer": "Bayanihan"
+    }
+  ]
+}
