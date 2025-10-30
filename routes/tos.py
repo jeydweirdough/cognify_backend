@@ -1,42 +1,58 @@
-from fastapi import APIRouter, HTTPException
-from database.firestore import db
-from models.schema_models import TOS
+from fastapi import APIRouter, HTTPException, status, Depends
+from typing import List
+from database.models import TOS, TOSBase
+from services import tos_service
+from core.security import allowed_users
 
-router = APIRouter(prefix="/tos", tags=["TOS"])
+router = APIRouter(prefix="/tos", tags=["Table Of Specifications"])
 
+@router.post("/", response_model=TOS, status_code=status.HTTP_201_CREATED, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def create_tos(payload: TOSBase):
+    try:
+        return await tos_service.create(payload)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.post("/", status_code=201)
-async def create_tos(payload: TOS):
-    ref = db.collection("tos").document(payload.id)
-    if ref.get().exists:
-        raise HTTPException(status_code=400, detail="TOS exists")
-    ref.set(payload.to_dict())
-    return payload.to_dict()
+@router.get("/by_subject/{subject_id}", response_model=List[TOS])
+async def list_tos_for_subject(subject_id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    return await tos_service.where("subject_id", "==", subject_id)
 
+@router.get("/deleted", response_model=List[TOS], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_tos(decoded=Depends(allowed_users(["admin"]))):
+    return await tos_service.get_all(deleted_status="deleted-only")
 
-@router.get("/{tos_id}")
-async def get_tos(tos_id: str):
-    doc = db.collection("tos").document(tos_id).get()
-    if not doc.exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    return dict(doc.to_dict(), id=doc.id)
+@router.get("/{id}", response_model=TOS)
+async def get_tos(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    tos = await tos_service.get(id)
+    if not tos:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return tos
 
+@router.get("/deleted/{id}", response_model=TOS, dependencies=[Depends(allowed_users(["admin"]))])
+async def get_single_deleted_tos(id: str):
+    tos = await tos_service.get(id, include_deleted=True)
+    if not tos or not tos.deleted:
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted TOS not found.")
+    return tos
 
-@router.get("/")
-async def list_tos():
-    return [dict(d.to_dict(), id=d.id) for d in db.collection("tos").stream()]
+@router.put("/{id}", response_model=TOS, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def update_tos(id: str, payload: TOSBase):
+    try:
+        return await tos_service.update(id, payload)
+    except HTTPException as e:
+        raise e
 
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def delete_tos(id: str):
+    try:
+        await tos_service.delete(id)
+        return None
+    except HTTPException as e:
+        raise e
 
-@router.put("/{tos_id}")
-async def update_tos(tos_id: str, payload: TOS):
-    ref = db.collection("tos").document(tos_id)
-    if not ref.get().exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    ref.update(payload.to_dict())
-    return dict(ref.get().to_dict(), id=tos_id)
-
-
-@router.delete("/{tos_id}")
-async def delete_tos(tos_id: str):
-    db.collection("tos").document(tos_id).delete()
-    return {"deleted": tos_id}
+@router.post("/restore/{id}", response_model=TOS, dependencies=[Depends(allowed_users(["admin"]))])
+async def restore_tos(id: str):
+    try:
+        return await tos_service.restore(id)
+    except HTTPException as e:
+        raise e

@@ -1,57 +1,57 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List
-from database.firestore import db
-from models.schema_models import Activity
-import asyncio
+from database.models import Activity, ActivityBase
+from services import activity_service
+from core.security import allowed_users
 
 router = APIRouter(prefix="/activities", tags=["Activities"])
 
+# --- (create_activity, list_activities, list_deleted_activities are fine) ---
+@router.post("/", response_model=Activity, status_code=status.HTTP_201_CREATED, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def create_activity(payload: ActivityBase):
+    try: return await activity_service.create(payload)
+    except Exception as e: raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.post("/", status_code=201)
-async def create_activity(payload: Activity):
-    doc_ref = db.collection("activities").document(payload.activity_id)
-    data = payload.to_dict()
+@router.get("/", response_model=List[Activity])
+async def list_activities(decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    return await activity_service.get_all()
 
-    def _create():
-        if doc_ref.get().exists:
-            raise HTTPException(status_code=400, detail="Activity already exists")
-        doc_ref.set(data)
-        return data
+@router.get("/deleted", response_model=List[Activity], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_activities():
+    return await activity_service.get_all(deleted_status="deleted-only")
 
-    return await asyncio.to_thread(_create)
+# --- FIX: Path changed to {id} ---
+@router.get("/{id}", response_model=Activity)
+async def get_activity(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    activity = await activity_service.get(id)
+    if not activity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    return activity
 
+# --- FIX: Path changed to {id} ---
+@router.get("/deleted/{id}", response_model=Activity, dependencies=[Depends(allowed_users(["admin"]))])
+async def get_single_deleted_activity(id: str):
+    activity = await activity_service.get(id, include_deleted=True)
+    if not activity or not activity.deleted:
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted activity not found.")
+    return activity
 
-@router.get("/{activity_id}")
-async def get_activity(activity_id: str):
-    doc = db.collection("activities").document(activity_id).get()
-    if not doc.exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    data = doc.to_dict()
-    data["activity_id"] = doc.id
-    return data
+# --- FIX: Path changed to {id} ---
+@router.put("/{id}", response_model=Activity, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def update_activity(id: str, payload: ActivityBase):
+    try: return await activity_service.update(id, payload)
+    except HTTPException as e: raise e
 
+# --- FIX: Path changed to {id} ---
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def delete_activity(id: str):
+    try:
+        await activity_service.delete(id)
+        return None
+    except HTTPException as e: raise e
 
-@router.get("/")
-async def list_activities():
-    docs = db.collection("activities").stream()
-    return [dict(doc.to_dict(), activity_id=doc.id) for doc in docs]
-
-
-@router.put("/{activity_id}")
-async def update_activity(activity_id: str, payload: Activity):
-    doc_ref = db.collection("activities").document(activity_id)
-    if not doc_ref.get().exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    doc_ref.update(payload.to_dict())
-    updated = doc_ref.get().to_dict()
-    updated["activity_id"] = activity_id
-    return updated
-
-
-@router.delete("/{activity_id}")
-async def delete_activity(activity_id: str):
-    doc_ref = db.collection("activities").document(activity_id)
-    if not doc_ref.get().exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    doc_ref.delete()
-    return {"deleted": activity_id}
+# --- FIX: Path changed to {id} ---
+@router.post("/restore/{id}", response_model=Activity, dependencies=[Depends(allowed_users(["admin"]))])
+async def restore_activity(id: str):
+    try: return await activity_service.restore(id)
+    except HTTPException as e: raise e

@@ -2,9 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
-
 from core.config import settings
-from routes import auth, profiles, status, activities, assessments, modules, quizzes, recommendations, students, tos
+from routes import (
+    auth, profiles, status, activities, assessments, 
+    modules, quizzes, recommendations, tos, 
+    subjects, analytics 
+)
 
 app = FastAPI(
     title="Cognify API",
@@ -31,8 +34,9 @@ app.include_router(assessments.router)
 app.include_router(modules.router)
 app.include_router(quizzes.router)
 app.include_router(recommendations.router)
-app.include_router(students.router)
 app.include_router(tos.router)
+app.include_router(subjects.router)
+app.include_router(analytics.router)
 
 @app.get("/")
 def root():

@@ -5,6 +5,9 @@ load_dotenv()
 
 class Settings:
     FIREBASE_API_KEY = os.getenv("FIREBASE_API_KEY")
+    # --- NEW: Add your Firebase Storage bucket name ---
+    FIREBASE_STORAGE_BUCKET = os.getenv("FIREBASE_STORAGE_BUCKET", "your-project-name.appspot.com")
+    
     SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "super-secret-session-key")
     PORT = int(os.getenv("PORT", 8000))
     ENVIRONMENT = os.getenv("ENVIRONMENT")
@@ -15,15 +18,20 @@ class Settings:
         "http://localhost:8000",
         "https://cognify-backend.vercel.app",
         "https://cognify-admins.vercel.app",
-        "https://cognify.vercel.app",  # Frontend production URL
-        "wss://cognify-backend.vercel.app",
-        # Allow all subdomains of vercel.app for preview deployments
+        "https://cognify.vercel.app",
         "https://*.vercel.app"
     ]
 
-    # WebSocket specific settings
-    WS_PING_INTERVAL = 30  # Send ping every 30 seconds
-    WS_PING_TIMEOUT = 10   # Wait 10 seconds for pong response
-    WS_CLOSE_TIMEOUT = 5   # Wait 5 seconds for graceful closure
+    # --- NEW: Define model paths ---
+    
+    # 1. Path to save the model in Firebase Storage
+    MODEL_STORAGE_PATH = "models/pass_predictor.joblib"
+    
+    # 2. Writable path on Vercel (ONLY /tmp is writable)
+    MODEL_LOCAL_PATH = "/tmp/pass_predictor.joblib"
+    
+    # 3. Path to the file in your Git repo (for the first time you deploy)
+    MODEL_FALLBACK_PATH = "ml/pass_predictor.joblib"
+
 
 settings = Settings()

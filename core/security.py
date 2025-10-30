@@ -1,6 +1,6 @@
 from fastapi import Request, Depends, HTTPException, status
 from firebase_admin import auth
-from database.firestore import db
+from core.firebase import db
 import asyncio
 
 async def get_user_role(uid: str) -> str:
@@ -30,7 +30,8 @@ def verify_firebase_token(request: Request):
     try:
         token = auth_header.split(" ")[1]
         return auth.verify_id_token(token)
-    except Exception:
+    except Exception as e:
+        print(f"Error verifying Firebase token: {e}")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 

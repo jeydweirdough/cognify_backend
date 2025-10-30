@@ -79,7 +79,7 @@ else:
 # === CHECK FASTAPI APP CONFIGURATION ===
 print("\n⚙️ Checking FastAPI configuration...")
 try:
-    from app.main import app
+    from main import app
     from fastapi import FastAPI
 
     if isinstance(app, FastAPI):
@@ -138,7 +138,7 @@ modules_to_check = [
     "app.main",
     "app.routes.auth",
     "app.routes.profiles",
-    "app.database.firestore",
+    "app.core.firebase",
     "app.utils.firebase_utils",
     "app.models.user_models"
 ]

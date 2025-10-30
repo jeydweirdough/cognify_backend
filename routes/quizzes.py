@@ -1,42 +1,58 @@
-from fastapi import APIRouter, HTTPException
-from database.firestore import db
-from models.schema_models import Quiz
+from fastapi import APIRouter, HTTPException, status, Depends
+from typing import List
+from database.models import Quiz, QuizBase
+from services import quiz_service
+from core.security import allowed_users
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
+@router.post("/", response_model=Quiz, status_code=status.HTTP_201_CREATED, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def create_quiz(payload: QuizBase):
+    try:
+        return await quiz_service.create(payload)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.post("/", status_code=201)
-async def create_quiz(payload: Quiz):
-    ref = db.collection("quizzes").document(payload.quiz_id)
-    if ref.get().exists:
-        raise HTTPException(status_code=400, detail="Quiz exists")
-    ref.set(payload.to_dict())
-    return payload.to_dict()
+@router.get("/", response_model=List[Quiz])
+async def list_quizzes(decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    return await quiz_service.get_all()
 
+@router.get("/deleted", response_model=List[Quiz], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_quizzes(decoded=Depends(allowed_users(["admin"]))):
+    return await quiz_service.get_all(deleted_status="deleted-only")
 
-@router.get("/{quiz_id}")
-async def get_quiz(quiz_id: str):
-    doc = db.collection("quizzes").document(quiz_id).get()
-    if not doc.exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    return dict(doc.to_dict(), quiz_id=doc.id)
+@router.get("/{id}", response_model=Quiz)
+async def get_quiz(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
+    quiz = await quiz_service.get(id)
+    if not quiz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return quiz
 
+@router.get("/deleted/{id}", response_model=Quiz, dependencies=[Depends(allowed_users(["admin"]))])
+async def get_single_deleted_quiz(id: str):
+    quiz = await quiz_service.get(id, include_deleted=True)
+    if not quiz or not quiz.deleted:
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deleted quiz not found.")
+    return quiz
 
-@router.get("/")
-async def list_quizzes():
-    return [dict(d.to_dict(), quiz_id=d.id) for d in db.collection("quizzes").stream()]
+@router.put("/{id}", response_model=Quiz, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def update_quiz(id: str, payload: QuizBase):
+    try:
+        return await quiz_service.update(id, payload)
+    except HTTPException as e:
+        raise e
 
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
+async def delete_quiz(id: str):
+    try:
+        await quiz_service.delete(id)
+        return None
+    except HTTPException as e:
+        raise e
 
-@router.put("/{quiz_id}")
-async def update_quiz(quiz_id: str, payload: Quiz):
-    ref = db.collection("quizzes").document(quiz_id)
-    if not ref.get().exists:
-        raise HTTPException(status_code=404, detail="Not found")
-    ref.update(payload.to_dict())
-    return dict(ref.get().to_dict(), quiz_id=quiz_id)
-
-
-@router.delete("/{quiz_id}")
-async def delete_quiz(quiz_id: str):
-    db.collection("quizzes").document(quiz_id).delete()
-    return {"deleted": quiz_id}
+@router.post("/restore/{id}", response_model=Quiz, dependencies=[Depends(allowed_users(["admin"]))])
+async def restore_quiz(id: str):
+    try:
+        return await quiz_service.restore(id)
+    except HTTPException as e:
+        raise e
