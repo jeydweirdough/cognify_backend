@@ -19,7 +19,7 @@ class Settings:
         "https://cognify-backend.vercel.app",
         "https://cognify-admins.vercel.app",
         "https://cognify.vercel.app",
-        "https://*.vercel.app"
+        "https://*.vercel.app",
     ]
 
     # --- NEW: Define model paths ---
