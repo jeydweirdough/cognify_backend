@@ -63,7 +63,6 @@ async def get_student_analytics(student_id: str) -> dict:
     )
     
     # We run .get() which requires an index, but is the correct way
-    # FIX: Removed 'await' from 'activities_ref.get()'.
     activities = [doc.to_dict() for doc in activities_ref.get()]
 
     if not activities:
@@ -179,8 +178,6 @@ async def generate_all_student_features():
     # --- NEW: We will also store the full analytics report ---
     all_analytics_reports = []
     
-    loop = asyncio.get_event_loop()
-
     for profile in student_profiles:
         student_id = profile.get("id")
         if not student_id:
@@ -247,12 +244,23 @@ async def train_model(features_df: pd.DataFrame):
             print("ERROR: ml/pass_predictor.joblib not found. Training failed.")
             return None
 
-    # Run blocking ML code in a thread
-    loop = asyncio.get_event_loop()
-    model = await loop.run_in_executor(None, lambda: LogisticRegression(max_iter=1000).fit(X_train, y_train))
-    
+    # --- THIS IS THE FIX ---
+    # 1. Define the training and test sets *before* trying to use them.
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # 2. Define a simple, synchronous function for the blocking ML work
+    def _fit_model(X, y):
+        model = LogisticRegression(max_iter=1000)
+        model.fit(X, y)
+        return model
     
+    # 3. Get the event loop and run the blocking function in a thread
+    loop = asyncio.get_event_loop()
+    # We pass _fit_model, X_train, and y_train as arguments
+    model = await loop.run_in_executor(None, _fit_model, X_train, y_train)
+    
+    # --- END FIX ---
+
     acc = accuracy_score(y_test, model.predict(X_test))
     print(f"New model trained. Accuracy: {acc * 100:.2f}%")
 
