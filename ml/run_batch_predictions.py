@@ -55,7 +55,9 @@ async def get_student_analytics(student_id: str) -> dict:
     )
     
     # We run .get() which requires an index, but is the correct way
-    activities = [doc.to_dict() for doc in await activities_ref.get()]
+    # FIX: Removed 'await' from 'activities_ref.get()'.
+    # .get() is a synchronous method and cannot be awaited.
+    activities = [doc.to_dict() for doc in activities_ref.get()]
 
     if not activities:
         return {"summary": {"overall_score": 0, "total_activities": 0, "time_spent_sec": 0}, "performance_by_bloom": []}
@@ -201,3 +203,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
