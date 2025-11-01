@@ -35,6 +35,9 @@ except Exception as e:
     print(f"CRITICAL: Failed to initialize Firebase: {e}")
     sys.exit(1)
 
+# --- NEW: Define collection name for analytics reports ---
+ANALYTICS_COLLECTION = "student_analytics_reports"
+
 # --- 2. Helper Functions (from your old services) ---
 
 async def get_role_id_by_designation(designation: str) -> str | None:
@@ -56,7 +59,6 @@ async def get_student_analytics(student_id: str) -> dict:
     
     # We run .get() which requires an index, but is the correct way
     # FIX: Removed 'await' from 'activities_ref.get()'.
-    # .get() is a synchronous method and cannot be awaited.
     activities = [doc.to_dict() for doc in activities_ref.get()]
 
     if not activities:
@@ -75,12 +77,12 @@ async def get_student_analytics(student_id: str) -> dict:
     }
     return {"summary": summary, "performance_by_bloom": bloom_dict}
 
-async def generate_all_student_features() -> pd.DataFrame:
+async def generate_all_student_features():
     print("Generating features for all students...")
     student_role_id = await get_role_id_by_designation("student")
     if not student_role_id:
         print("Error: 'student' role not found.")
-        return pd.DataFrame()
+        return pd.DataFrame(), [] # Return empty list for reports
 
     # --- THIS IS THE EFFICIENT QUERY ---
     # This is the query that failed before. It is the *correct* query.
@@ -94,6 +96,9 @@ async def generate_all_student_features() -> pd.DataFrame:
     student_profiles = [doc.to_dict() for doc in student_profiles_query.stream()]
 
     all_features = []
+    # --- NEW: We will also store the full analytics report ---
+    all_analytics_reports = []
+    
     for profile in student_profiles:
         student_id = profile.get("id")
         if not student_id:
@@ -101,6 +106,7 @@ async def generate_all_student_features() -> pd.DataFrame:
 
         analytics = await get_student_analytics(student_id)
 
+        # This `features` dict is what the ML model needs
         features = {
             "student_id": student_id,
             "pre_assessment_score": profile.get("pre_assessment_score", 0) or 0,
@@ -108,16 +114,33 @@ async def generate_all_student_features() -> pd.DataFrame:
             "total_activities": analytics["summary"]["total_activities"],
             "time_spent_sec": analytics["summary"]["time_spent_sec"]
         }
+        
+        bloom_features = {}
         for item in analytics["performance_by_bloom"]:
+            # Add to ML features
             features[f"bloom_{item['bloom_level']}"] = item['score']
+            # Add to bloom_features for the report
+            bloom_features[item['bloom_level']] = item['score']
 
         all_features.append(features)
+        
+        # --- NEW: Create the full analytics report for this student ---
+        # This is the data that matches your manuscript's goals
+        report_data = {
+            "student_id": student_id,
+            "summary": analytics["summary"],
+            "performance_by_bloom": bloom_features, # Use the clean dict
+            "last_updated": firestore.SERVER_TIMESTAMP
+        }
+        all_analytics_reports.append(report_data)
 
     if not all_features:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
     df = pd.DataFrame(all_features).fillna(0)
-    return df
+    
+    # --- NEW: Return both the features DataFrame and the list of reports ---
+    return df, all_analytics_reports
 
 async def train_model(features_df: pd.DataFrame):
     print("Starting model training...")
@@ -154,10 +177,24 @@ async def train_model(features_df: pd.DataFrame):
 
 # --- 3. Main Script Logic ---
 async def main():
-    features_df = await generate_all_student_features()
+    # --- NEW: Get both features and reports ---
+    features_df, student_reports = await generate_all_student_features()
+    
     if features_df.empty:
         print("No features generated. Exiting.")
         return
+
+    # --- NEW: Save the detailed analytics reports to Firestore ---
+    # This is Step 1 of the new architecture
+    print(f"Saving {len(student_reports)} individual analytics reports...")
+    batch = db.batch()
+    for report in student_reports:
+        student_id = report["student_id"]
+        doc_ref = db.collection(ANALYTICS_COLLECTION).document(student_id)
+        batch.set(doc_ref, report)
+    batch.commit()
+    print(f"Successfully saved {len(student_reports)} reports to '{ANALYTICS_COLLECTION}'.")
+    # --- End of new step ---
 
     model = await train_model(features_df)
     if model is None:
@@ -199,7 +236,7 @@ async def main():
     print(f"Saving {len(results_by_student)} predictions to Firestore...")
     doc_ref = db.collection("daily_predictions").document("latest")
     doc_ref.set(final_output)
-    print("Batch job complete. Predictions saved to Firestore.")
+    print("Batch job complete. Predictions and Analytics saved to Firestore.")
 
 if __name__ == "__main__":
     asyncio.run(main())
