@@ -35,8 +35,9 @@ except Exception as e:
     print(f"CRITICAL: Failed to initialize Firebase: {e}")
     sys.exit(1)
 
-# --- NEW: Define collection name for analytics reports ---
+# --- Define collection names ---
 ANALYTICS_COLLECTION = "student_analytics_reports"
+PREDICTIONS_COLLECTION = "daily_predictions"
 
 # --- 2. Helper Functions (from your old services) ---
 
@@ -120,7 +121,7 @@ async def generate_all_student_features():
             # Add to ML features
             features[f"bloom_{item['bloom_level']}"] = item['score']
             # Add to bloom_features for the report
-            bloom_features[item['bloom_level']] = item['score']
+            bloom_features[item['bloom_level']] = round(item['score'], 2)
 
         all_features.append(features)
         
@@ -130,7 +131,7 @@ async def generate_all_student_features():
             "student_id": student_id,
             "summary": analytics["summary"],
             "performance_by_bloom": bloom_features, # Use the clean dict
-            "last_updated": firestore.SERVER_TIMESTAMP
+            # We will add "prediction" data to this dict later
         }
         all_analytics_reports.append(report_data)
 
@@ -184,18 +185,6 @@ async def main():
         print("No features generated. Exiting.")
         return
 
-    # --- NEW: Save the detailed analytics reports to Firestore ---
-    # This is Step 1 of the new architecture
-    print(f"Saving {len(student_reports)} individual analytics reports...")
-    batch = db.batch()
-    for report in student_reports:
-        student_id = report["student_id"]
-        doc_ref = db.collection(ANALYTICS_COLLECTION).document(student_id)
-        batch.set(doc_ref, report)
-    batch.commit()
-    print(f"Successfully saved {len(student_reports)} reports to '{ANALYTICS_COLLECTION}'.")
-    # --- End of new step ---
-
     model = await train_model(features_df)
     if model is None:
         print("Model training/loading failed. Exiting.")
@@ -211,16 +200,42 @@ async def main():
     predictions = model.predict(X_live)
     probabilities = model.predict_proba(X_live)[:, 1] 
 
-    results_by_student = []
-    for i, student_id in enumerate(student_ids):
-        results_by_student.append({
-            "student_id": student_id,
+    # --- NEW: Combine analytics and predictions ---
+    global_predictions_list = []
+    
+    print(f"Saving {len(student_reports)} individual analytics reports...")
+    batch = db.batch()
+    
+    for i, report in enumerate(student_reports):
+        student_id = report["student_id"]
+        
+        # Create the prediction data
+        prediction_data = {
             "predicted_to_pass": bool(predictions[i]),
             "pass_probability": round(probabilities[i] * 100, 2)
+        }
+        
+        # Add the prediction data to the main report
+        report["prediction"] = prediction_data
+        report["last_updated"] = firestore.SERVER_TIMESTAMP
+        
+        # Add this combined report to the batch
+        doc_ref = db.collection(ANALYTICS_COLLECTION).document(student_id)
+        batch.set(doc_ref, report)
+        
+        # Also add the prediction to the global list
+        global_predictions_list.append({
+            "student_id": student_id,
+            **prediction_data
         })
 
+    # Commit the batch to save all student reports
+    batch.commit()
+    print(f"Successfully saved {len(student_reports)} combined reports to '{ANALYTICS_COLLECTION}'.")
+    
+    # --- Now save the GLOBAL summary for the admin dashboard ---
     total_pass = sum(predictions)
-    total_students = len(results_by_student)
+    total_students = len(global_predictions_list)
 
     final_output = {
         "summary": {
@@ -229,12 +244,12 @@ async def main():
             "count_predicted_to_fail": int(total_students - total_pass),
             "predicted_pass_rate": round((total_pass / total_students) * 100, 2) if total_students > 0 else 0
         },
-        "predictions": results_by_student,
+        "predictions": global_predictions_list, # This is the list of individual predictions
         "last_updated": firestore.SERVER_TIMESTAMP
     }
 
-    print(f"Saving {len(results_by_student)} predictions to Firestore...")
-    doc_ref = db.collection("daily_predictions").document("latest")
+    print(f"Saving global prediction summary to '{PREDICTIONS_COLLECTION}'...")
+    doc_ref = db.collection(PREDICTIONS_COLLECTION).document("latest")
     doc_ref.set(final_output)
     print("Batch job complete. Predictions and Analytics saved to Firestore.")
 

@@ -4,12 +4,13 @@ from core.security import allowed_users
 from core.firebase import db
 import asyncio
 from google.cloud.firestore_v1.base_query import FieldFilter
+from typing import Dict, Any
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & AI"])
 
 # The Firestore collection where your daily script will save the results
 PREDICTIONS_COLLECTION = "daily_predictions"
-# --- NEW: The collection to store pre-calculated student reports ---
+# The collection that stores the pre-calculated reports for each student
 ANALYTICS_COLLECTION = "student_analytics_reports"
 
 
@@ -41,48 +42,21 @@ async def get_global_pass_fail_predictions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- NEW ENDPOINT 1: Get a student's pre-calculated prediction ---
-@router.get("/prediction/{user_id}")
-async def get_student_prediction(
+# --- ENDPOINT 1 DELETED ---
+# We are removing the /prediction/{user_id} endpoint because
+# this data will now be included in the main /report/{user_id} endpoint.
+
+
+# --- UPDATED ENDPOINT 2: Renamed and now returns the full report ---
+@router.get("/report/{user_id}", response_model=Dict[str, Any])
+async def get_student_report(
     user_id: str,
     decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
 ):
     """
-    [Admin/Faculty/Student (self)] Fetches a single student's
-    pre-calculated AI prediction from the latest daily job.
-    """
-    def _fetch_prediction():
-        doc = db.collection(PREDICTIONS_COLLECTION).document("latest").get()
-        if not doc.exists:
-            raise HTTPException(status_code=404, detail="Analytics data not found.")
-        
-        all_predictions = doc.to_dict().get("predictions", [])
-        
-        # Find the specific student in the predictions array
-        for pred in all_predictions:
-            if pred.get("student_id") == user_id:
-                return pred
-        
-        # If loop finishes without finding, raise 404
-        raise HTTPException(status_code=404, detail="Prediction for this student not found.")
-
-    try:
-        prediction = await asyncio.to_thread(_fetch_prediction)
-        return prediction
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --- UPDATED ENDPOINT 2: Get pre-calculated, detailed analytics ---
-@router.get("/details/{user_id}")
-async def get_student_activity_details(
-    user_id: str,
-    decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
-):
-    """
-    [Admin/Faculty/Student (self)] Runs a fresh, on-demand
-    calculation of a student's activity summary and performance.
+    [Admin/Faculty/Student (self)] Fetches the complete, pre-calculated
+    analytics report for a single student. This includes their
+    performance summary, bloom-level scores, and AI pass/fail prediction.
     """
     def _fetch_student_report():
         # This is now a simple, fast, and cheap (1 read) operation.
@@ -93,7 +67,7 @@ async def get_student_activity_details(
         return doc.to_dict()
 
     try:
-        # This will run the query and calculations right now
+        # This just fetches the pre-calculated document.
         analytics_data = await asyncio.to_thread(_fetch_student_report)
         return analytics_data
     except HTTPException as e:
