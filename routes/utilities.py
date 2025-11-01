@@ -13,7 +13,7 @@ from firebase_admin import messaging
 
 router = APIRouter(prefix="/utilities", tags=["Utilities"])
 
-# --- This list is now a GENERIC FALLBACK ---
+# --- UPDATED: Added more fallback messages ---
 GENERIC_MESSAGES = [
     {
         "quote": "It always seems impossible until it's done.",
@@ -26,6 +26,22 @@ GENERIC_MESSAGES = [
     {
         "quote": "The journey of a thousand miles begins with a single step. Let's get started.",
         "author": "Laozi (adapted)"
+    },
+    {
+        "quote": "Success is not final, failure is not fatal: it is the courage to continue that counts.",
+        "author": "Winston Churchill"
+    },
+    {
+        "quote": "Believe you can and you're halfway there.",
+        "author": "Theodore Roosevelt"
+    },
+    {
+        "quote": "The best way to predict the future is to create it. Let's study!",
+        "author": "Peter Drucker"
+    },
+    {
+        "quote": "Don't watch the clock; do what it does. Keep going.",
+        "author": "Sam Levenson"
     }
 ]
 
@@ -43,9 +59,10 @@ class CustomMotivationPayload(BaseModel):
     author: Optional[str] = "Your Faculty Advisor"
 
 
-# --- UPDATED: Endpoint now checks for custom quotes first ---
-@router.get("/motivation", response_model=Dict[str, str])
+# --- UPDATED: Route changed to /motivation/{user_id} ---
+@router.get("/motivation/{user_id}", response_model=Dict[str, str])
 async def get_motivational_message(
+    user_id: str, # Added user_id as a path parameter
     decoded=Depends(allowed_users(["student", "faculty_member", "admin"]))
 ):
     """
@@ -57,7 +74,7 @@ async def get_motivational_message(
     3. A generic fallback quote.
     """
     
-    user_id = decoded.get("uid")
+    # user_id now comes from the function argument, not the decoded token
     
     def _get_ai_quote_sync():
         try:
@@ -102,7 +119,6 @@ async def get_motivational_message(
 
 
 # --- NEW: Endpoint to set a custom motivation for a student ---
-# --- UPDATED: Route changed from /custom_motivation to /motivation ---
 @router.put("/motivation/{user_id}", status_code=status.HTTP_200_OK)
 async def set_custom_motivation(
     user_id: str,
@@ -133,7 +149,6 @@ async def set_custom_motivation(
 
 
 # --- NEW: Endpoint to clear the custom motivation ---
-# --- UPDATED: Route changed from /custom_motivation to /motivation ---
 @router.delete("/motivation/{user_id}", status_code=status.HTTP_200_OK)
 async def clear_custom_motivation(
     user_id: str,
@@ -208,5 +223,4 @@ async def send_study_reminder(
     await asyncio.to_thread(_send_notification_sync)
     
     return {"message": "Reminder sent to processing queue."}
-
 
