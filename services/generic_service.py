@@ -34,7 +34,7 @@ class FirestoreModelService:
             query = self.db
             
             if self._has_timestamps:
-                # This query is fine because it's only on one field
+                # This query is efficient because it's only on one field
                 if deleted_status == "non-deleted":
                     query = query.where(filter=FieldFilter("deleted", "!=", True))
                 elif deleted_status == "deleted-only":
@@ -149,7 +149,7 @@ class FirestoreModelService:
         def _update_sync():
             doc_ref = self.db.document(doc_id)
             if not doc_ref.get().exists:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+                raise HTTPException(status.HTTP_4404_NOT_FOUND, "Document not found")
             
             data_dict = data.model_dump(exclude_unset=True) 
 
@@ -167,23 +167,27 @@ class FirestoreModelService:
 
     async def where(self, field: str, operator: str, value: Any) -> List[ModelType]:
         """
-        Performs a 'where' query and filters for non-deleted items in Python
-        to avoid composite indexes.
+        Performs an efficient 'where' query that ALSO filters for
+        non-deleted items at the database level.
+        
+        THIS WILL REQUIRE COMPOSITE INDEXES, which is correct.
         """
         def _where_sync():
             items = []
-            # --- 1. REMOVED THE COMPOSITE QUERY ---
-            # This query is simple and does not require a composite index.
+            
+            # --- THIS IS THE FIX ---
+            # 1. Start the query on the field you requested
             query = self.db.where(filter=FieldFilter(field, operator, value))
+            
+            # 2. Add the 'deleted' filter to the DATABASE QUERY
+            #    This makes the query efficient and avoids wasted reads.
+            if self._has_timestamps:
+                query = query.where(filter=FieldFilter("deleted", "!=", True))
                            
             for doc in query.stream():
                 data = doc.to_dict()
                 
-                # --- 2. ADDED CONDITIONAL AS REQUESTED ---
-                # This check happens in Python, *after* fetching.
-                # It avoids the composite index entirely.
-                if self._has_timestamps and data.get("deleted") == True:
-                    continue # Skip this document
+                # We no longer need the Python 'if' check here
                 
                 data["id"] = doc.id
                 try:

@@ -56,13 +56,18 @@ async def get_all_profiles(request: Request, decoded=Depends(allowed_users(["adm
         roles_map = {doc.id: doc.to_dict().get("designation", "Unknown") for doc in roles_ref.stream()}
         student_role_id = next((role_id for role_id, designation in roles_map.items() if designation == "student"), None)
         
-        # --- FIX: Use filter= to remove UserWarning ---
+        # --- THIS IS THE FIX ---
+        # 1. Base query is now efficient
         base_query = db.collection("user_profiles").where(filter=FieldFilter("deleted", "!=", True))
         
+        # 2. Add the second 'where' filter
         if caller_role == "faculty_member":
             if not student_role_id: return []
+            # This is now a compound query, just like the ML script
+            # It will require an index, which is correct.
             query = base_query.where(filter=FieldFilter("role_id", "==", student_role_id))
         else:
+            # Admin just gets non-deleted users
             query = base_query
             
         profiles = []
@@ -104,7 +109,7 @@ async def admin_create_user_and_profile(
             email=user_data.email, 
             password=user_data.password
         )
-    except auth.EmailAlreadyExistsError:
+    except firebase_auth.EmailAlreadyExistsError:
         raise HTTPException(status_code=400, detail=f"Account with email {user_data.email} already exists.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to create Firebase auth user: {e}")

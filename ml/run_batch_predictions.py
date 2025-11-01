@@ -46,7 +46,15 @@ async def get_role_id_by_designation(designation: str) -> str | None:
     return None
 
 async def get_student_analytics(student_id: str) -> dict:
-    activities_ref = db.collection("activities").where("user_id", "==", student_id)
+    # --- THIS IS NOW EFFICIENT ---
+    # We create the query and add the 'deleted' filter
+    activities_ref = db.collection("activities").where(
+        filter=FieldFilter("user_id", "==", student_id)
+    ).where(
+        filter=FieldFilter("deleted", "!=", True) # This makes it efficient
+    )
+    
+    # We run .get() which requires an index, but is the correct way
     activities = [doc.to_dict() for doc in await activities_ref.get()]
 
     if not activities:
@@ -72,7 +80,16 @@ async def generate_all_student_features() -> pd.DataFrame:
         print("Error: 'student' role not found.")
         return pd.DataFrame()
 
-    student_profiles = [doc.to_dict() for doc in db.collection("user_profiles").where(filter=FieldFilter("role_id", "==", student_role_id)).where(filter=FieldFilter("deleted", "!=", True)).stream()]
+    # --- THIS IS THE EFFICIENT QUERY ---
+    # This is the query that failed before. It is the *correct* query.
+    # It will require an index, which you must create.
+    student_profiles_query = db.collection("user_profiles").where(
+        filter=FieldFilter("role_id", "==", student_role_id)
+    ).where(
+        filter=FieldFilter("deleted", "!=", True)
+    )
+    
+    student_profiles = [doc.to_dict() for doc in student_profiles_query.stream()]
 
     all_features = []
     for profile in student_profiles:
