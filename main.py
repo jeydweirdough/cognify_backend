@@ -6,7 +6,8 @@ from core.config import settings
 from routes import (
     auth, profiles, status, activities, assessments, 
     modules, quizzes, recommendations, tos, 
-    subjects, analytics 
+    subjects, analytics, 
+    utilities  # --- NEW: Import utilities ---
 )
 
 app = FastAPI(
@@ -37,6 +38,7 @@ app.include_router(recommendations.router)
 app.include_router(tos.router)
 app.include_router(subjects.router)
 app.include_router(analytics.router)
+app.include_router(utilities.router)
 
 @app.get("/")
 def root():

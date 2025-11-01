@@ -12,6 +12,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import json
 from google.cloud.firestore_v1.base_query import FieldFilter
+# --- NEW: Import requests library ---
+# Note: You MUST add 'requests' to your 'requirements-ml.txt' file
+import requests 
+import time
 
 # --- 1. Setup Firebase Admin ---
 print("Starting daily prediction batch job...")
@@ -78,6 +82,81 @@ async def get_student_analytics(student_id: str) -> dict:
     }
     return {"summary": summary, "performance_by_bloom": bloom_dict}
 
+# --- NEW: Function to call Gemini API (using 'requests') ---
+def get_ai_motivational_quote(report_data: dict, retry_count=3) -> str:
+    """
+    Calls the Gemini API to generate a personalized motivational quote.
+    This is a SYNCHRONOUS function using 'requests'.
+    """
+    try:
+        # 1. Extract data for the prompt
+        prob = report_data.get("prediction", {}).get("pass_probability", 75.0)
+        activities = report_data.get("summary", {}).get("total_activities", 10)
+        bloom = report_data.get("performance_by_bloom", {})
+        
+        # Find the weakest area
+        weakest_area = ""
+        if bloom:
+            # Find the bloom level with the minimum score
+            weakest_area = min(bloom.items(), key=lambda item: item[1])[0]
+
+        # 2. Create the prompt
+        system_prompt = (
+            "You are an encouraging and wise mentor for a psychology student "
+            "preparing for their licensure exam. Your role is to provide a single, "
+            "short (1-2 sentence) motivational quote. Be specific, positive, and forward-looking. "
+            "Do not use markdown."
+        )
+        
+        user_query = (
+            f"My student's profile: "
+            f"Pass Probability: {prob}%. "
+            f"Total Activities: {activities}. "
+            f"Weakest Area: '{weakest_area}'. "
+            "Write a single, new motivational quote for them."
+        )
+
+        # 3. Call the Gemini API
+        api_key = "" # This is handled by the platform
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [{ "parts": [{ "text": user_query }] }],
+            "systemInstruction": { "parts": [{ "text": system_prompt }] },
+        }
+
+        # 4. Make the request using 'requests' (synchronous)
+        response = requests.post(api_url, json=payload, timeout=10)
+        response.raise_for_status() # Raise an error for bad responses
+        
+        result = response.json()
+        text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        
+        if text:
+            print(f"Generated AI quote for {report_data['student_id']}.")
+            return text.strip().strip('"')
+
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429 and retry_count > 0: # Handle rate limiting
+            print(f"Rate limited. Retrying in {6 - retry_count}s...")
+            time.sleep(6 - retry_count) # Exponential backoff
+            return get_ai_motivational_quote(report_data, retry_count - 1)
+        print(f"Error generating AI quote (HTTPError): {e}")
+    except Exception as e:
+        print(f"Error generating AI quote: {e}")
+
+    # --- Fallback Logic (if API fails) ---
+    print(f"Using fallback quote for student {report_data['student_id']}.")
+    if activities <= 5:
+        return "The journey of a thousand miles begins with a single step. Let's get started with one module today."
+    elif prob < 60:
+        return f"It looks like '{weakest_area}' is a challenge. Failure is not fatal: it's the courage to continue that counts. Let's review that area."
+    elif prob > 95:
+        return "Great work! You're acing this. Keep that passion and mastery."
+    else:
+        return "You're on the right track! Success is the sum of small efforts, repeated day in and day out. Keep going."
+
+
 async def generate_all_student_features():
     print("Generating features for all students...")
     student_role_id = await get_role_id_by_designation("student")
@@ -100,11 +179,14 @@ async def generate_all_student_features():
     # --- NEW: We will also store the full analytics report ---
     all_analytics_reports = []
     
+    loop = asyncio.get_event_loop()
+
     for profile in student_profiles:
         student_id = profile.get("id")
         if not student_id:
             continue
 
+        # Run the async analytics function in the event loop
         analytics = await get_student_analytics(student_id)
 
         # This `features` dict is what the ML model needs
@@ -131,7 +213,7 @@ async def generate_all_student_features():
             "student_id": student_id,
             "summary": analytics["summary"],
             "performance_by_bloom": bloom_features, # Use the clean dict
-            # We will add "prediction" data to this dict later
+            # We will add "prediction" and "ai_motivation" data later
         }
         all_analytics_reports.append(report_data)
 
@@ -165,10 +247,12 @@ async def train_model(features_df: pd.DataFrame):
             print("ERROR: ml/pass_predictor.joblib not found. Training failed.")
             return None
 
+    # Run blocking ML code in a thread
+    loop = asyncio.get_event_loop()
+    model = await loop.run_in_executor(None, lambda: LogisticRegression(max_iter=1000).fit(X_train, y_train))
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    model = LogisticRegression(max_iter=1000)
-    model.fit(X_train, y_train)
-
+    
     acc = accuracy_score(y_test, model.predict(X_test))
     print(f"New model trained. Accuracy: {acc * 100:.2f}%")
 
@@ -205,6 +289,7 @@ async def main():
     
     print(f"Saving {len(student_reports)} individual analytics reports...")
     batch = db.batch()
+    loop = asyncio.get_event_loop()
     
     for i, report in enumerate(student_reports):
         student_id = report["student_id"]
@@ -217,6 +302,12 @@ async def main():
         
         # Add the prediction data to the main report
         report["prediction"] = prediction_data
+        
+        # --- NEW: Generate and add the AI motivational quote ---
+        # We run the blocking 'requests' call in a thread
+        ai_quote = await loop.run_in_executor(None, get_ai_motivational_quote, report)
+        
+        report["ai_motivation"] = ai_quote
         report["last_updated"] = firestore.SERVER_TIMESTAMP
         
         # Add this combined report to the batch
@@ -254,5 +345,8 @@ async def main():
     print("Batch job complete. Predictions and Analytics saved to Firestore.")
 
 if __name__ == "__main__":
+    # Add 'requests' to the ml requirements
+    # You must run: pip install -r requirements-ml.txt
+    # after adding 'requests' to that file.
     asyncio.run(main())
 

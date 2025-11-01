@@ -1,39 +1,32 @@
 # routes/analytics.py
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends
 from core.security import allowed_users
 from core.firebase import db
 import asyncio
-from google.cloud.firestore_v1.base_query import FieldFilter
 from typing import Dict, Any
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & AI"])
 
-# The Firestore collection where your daily script will save the results
+# The Firestore collection where your daily script saves the *global* report
 PREDICTIONS_COLLECTION = "daily_predictions"
-# The collection that stores the pre-calculated reports for each student
-ANALYTICS_COLLECTION = "student_analytics_reports"
+# The Firestore collection where your daily script saves the *individual* reports
+STUDENT_ANALYTICS_COLLECTION = "student_analytics_reports"
 
 
-# --- DELETED ---
-# We are removing the on-demand 'get_student_analytics_py' function.
-# It is too slow and expensive for a live API.
-# This calculation will now be done by the daily batch script.
-
-
-# --- EXISTING ENDPOINT (Unchanged) ---
 @router.get("/global_predictions")
 async def get_global_pass_fail_predictions(
     decoded=Depends(allowed_users(["admin", "faculty_member"]))
 ):
     """
-    [Admin/Faculty] Fetches the pre-calculated global AI predictions
-    from the Firestore 'daily_predictions' collection.
+    [Admin/Faculty] Fetches the pre-calculated GLOBAL AI predictions
+    from the 'daily_predictions' collection for the main dashboard.
+    This is fast and efficient (1 read).
     """
     def _fetch_predictions():
         doc_ref = db.collection(PREDICTIONS_COLLECTION).document("latest")
         doc = doc_ref.get()
         if not doc.exists:
-            raise HTTPException(status_code=404, detail="Analytics data not found. The daily job may not have run yet.")
+            raise HTTPException(status_code=404, detail="Global analytics data not found. The daily job may not have run yet.")
         return doc.to_dict()
 
     try:
@@ -42,48 +35,49 @@ async def get_global_pass_fail_predictions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- ENDPOINT 1 DELETED ---
-# We are removing the /prediction/{user_id} endpoint because
-# this data will now be included in the main /report/{user_id} endpoint.
 
-
-# --- UPDATED ENDPOINT 2: Renamed and now returns the full report ---
-@router.get("/report/{user_id}", response_model=Dict[str, Any])
-async def get_student_report(
+@router.get("/student_report/{user_id}")
+async def get_student_analytics_report(
     user_id: str,
     decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
 ):
     """
-    [Admin/Faculty/Student (self)] Fetches the complete, pre-calculated
-    analytics report for a single student. This includes their
-    performance summary, bloom-level scores, and AI pass/fail prediction.
+    [Student/Faculty/Admin] Fetches the pre-calculated, combined analytics 
+    and AI prediction report for a SINGLE student.
+    
+    This fulfills the "Progress and Report Module" from your manuscript.
+    It is fast and efficient (1 read).
     """
+    caller_role = decoded.get("role")
+    caller_uid = decoded.get("uid")
+
+    # Students can only view their own report
+    if caller_role == "student" and user_id != caller_uid:
+        raise HTTPException(status_code=403, detail="You may only view your own analytics report.")
+
     def _fetch_student_report():
-        # This is now a simple, fast, and cheap (1 read) operation.
-        doc_ref = db.collection(ANALYTICS_COLLECTION).document(user_id)
+        doc_ref = db.collection(STUDENT_ANALYTICS_COLLECTION).document(user_id)
         doc = doc_ref.get()
         if not doc.exists:
-            raise HTTPException(status_code=404, detail="Analytics report for this student not found. The daily job may not have run.")
-        return doc.to_dict()
+            raise HTTPException(status_code=404, detail=f"Analytics report not found for user {user_id}. The daily job may not have run yet.")
+        
+        report = doc.to_dict()
+        
+        # Ensure the report has all key parts, provide defaults if not
+        return {
+            "student_id": report.get("student_id", user_id),
+            "summary": report.get("summary", {}),
+            "performance_by_bloom": report.get("performance_by_bloom", {}),
+            "prediction": report.get("prediction", {}),
+            "ai_motivation": report.get("ai_motivation", "Keep up the hard work!"),
+            "last_updated": report.get("last_updated")
+        }
 
     try:
-        # This just fetches the pre-calculated document.
-        analytics_data = await asyncio.to_thread(_fetch_student_report)
-        return analytics_data
+        report = await asyncio.to_thread(_fetch_student_report)
+        return report
     except HTTPException as e:
         raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {e}")
-
-
-# --- EXISTING ENDPOINT (Unchanged) ---
-@router.post("/retrain")
-async def retrain_model(
-    decoded=Depends(allowed_users(["admin"]))
-):
-    """
-    This endpoint is now optional. It's better to let the daily
-    GitHub Action handle retraining.
-    """
-    return {"message": "Retraining is now handled automatically once per day."}
+        raise HTTPException(status_code=500, detail=str(e))
 
