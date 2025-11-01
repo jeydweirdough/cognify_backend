@@ -11,6 +11,10 @@ from services import profile_service
 # --- NEW: Import Firebase Admin Messaging ---
 from firebase_admin import messaging
 
+# --- NEW: Import 'requests' for live API calls ---
+import requests
+import time
+
 router = APIRouter(prefix="/utilities", tags=["Utilities"])
 
 # --- UPDATED: Added more fallback messages ---
@@ -59,18 +63,129 @@ class CustomMotivationPayload(BaseModel):
     author: Optional[str] = "Your Faculty Advisor"
 
 
-# --- UPDATED: Route changed to /motivation/{user_id} ---
+# --- NEW: Helper function to generate AI quote on-demand ---
+def _call_gemini_api_sync(report_data: dict, retry_count=3) -> str:
+    """
+    This is a SYNCHRONOUS, BLOCKING function that calls the Gemini API.
+    It's designed to be run in a thread.
+    """
+    try:
+        # 1. Extract data for the prompt
+        prob = report_data.get("prediction", {}).get("pass_probability", 75.0)
+        activities = report_data.get("summary", {}).get("total_activities", 10)
+        bloom = report_data.get("performance_by_bloom", {})
+        
+        weakest_area = ""
+        if bloom:
+            weakest_area = min(bloom.items(), key=lambda item: item[1])[0]
+
+        # 2. Create the prompt
+        system_prompt = (
+            "You are an encouraging and wise mentor for a psychology student "
+            "preparing for their licensure exam. Your role is to provide a single, "
+            "short (1-2 sentence) motivational quote. Be specific, positive, and forward-looking. "
+            "Do not use markdown."
+        )
+        
+        user_query = (
+            f"My student's profile: "
+            f"Pass Probability: {prob}%. "
+            f"Total Activities: {activities}. "
+            f"Weakest Area: '{weakest_area}'. "
+            "Write a single, new, *different* motivational quote for them."
+        )
+
+        # 3. Call the Gemini API
+        api_key = "" # This is handled by the platform
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={api_key}"
+        
+        payload = {
+            "contents": [{ "parts": [{ "text": user_query }] }],
+            "systemInstruction": { "parts": [{ "text": system_prompt }] },
+        }
+
+        # 4. Make the request using 'requests' (synchronous)
+        response = requests.post(api_url, json=payload, timeout=10)
+        response.raise_for_status() # Raise an error for bad responses
+        
+        result = response.json()
+        text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        
+        if text:
+            print(f"Generated ON-DEMAND AI quote for {report_data.get('student_id')}.")
+            return text.strip().strip('"')
+
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429 and retry_count > 0: # Handle rate limiting
+            print(f"Rate limited. Retrying in {6 - retry_count}s...")
+            time.sleep(6 - retry_count) # Exponential backoff
+            return _call_gemini_api_sync(report_data, retry_count - 1)
+        print(f"Error generating AI quote (HTTPError): {e}")
+    except Exception as e:
+        print(f"Error generating AI quote: {e}")
+
+    # --- Fallback Logic (if API fails) ---
+    return "Keep pushing forward. Every bit of effort counts!"
+
+
+# --- NEW: On-demand POST endpoint to generate a fresh quote ---
+@router.post("/motivation/generate/{user_id}", response_model=Dict[str, str])
+async def generate_new_motivational_message(
+    user_id: str,
+    decoded=Depends(allowed_users(["student"])) # Only students can generate for themselves
+):
+    """
+    [Student] Generates a new, on-demand AI motivational quote.
+    This is an "expensive" call and should be used sparingly
+    (e.g., via a button click).
+    """
+    
+    def _generate_and_save_sync():
+        # 1. Fetch the student's *existing* analytics report (1 read)
+        doc_ref = db.collection(ANALYTICS_COLLECTION).document(user_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Analytics report not found. Cannot generate quote.")
+        
+        report_data = doc.to_dict()
+        report_data["student_id"] = user_id # Ensure ID is present
+
+        # 2. Call the blocking Gemini API function
+        new_quote = _call_gemini_api_sync(report_data)
+
+        # 3. Save the new quote back to the document
+        # This also clears any custom faculty quote, as the student
+        # has requested a new one.
+        doc_ref.update({
+            "ai_motivation": new_quote,
+            "custom_motivation": None
+        })
+        
+        return {
+            "quote": new_quote,
+            "author": "Cognify AI Mentor"
+        }
+
+    try:
+        # Run the entire process in a thread to avoid blocking the API
+        return await asyncio.to_thread(_generate_and_save_sync)
+    except Exception as e:
+        print(f"Error in on-demand generation: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate new motivation.")
+
+
+# --- This endpoint is for READING the saved quote (fast) ---
 @router.get("/motivation/{user_id}", response_model=Dict[str, str])
 async def get_motivational_message(
     user_id: str, # Added user_id as a path parameter
     decoded=Depends(allowed_users(["student", "faculty_member", "admin"]))
 ):
     """
-    [All Users] Fetches the personalized motivational quote.
+    [All Users] Fetches the *currently saved* personalized quote.
     
     This is fast and efficient (1 read). It prioritizes:
-    1. A custom quote from faculty.
-    2. The daily AI-generated quote.
+    1. A custom quote from faculty (set via PUT).
+    2. The daily or on-demand AI-generated quote.
     3. A generic fallback quote.
     """
     
@@ -118,7 +233,7 @@ async def get_motivational_message(
     return await asyncio.to_thread(_get_ai_quote_sync)
 
 
-# --- NEW: Endpoint to set a custom motivation for a student ---
+# --- This endpoint is for FACULTY to override the quote ---
 @router.put("/motivation/{user_id}", status_code=status.HTTP_200_OK)
 async def set_custom_motivation(
     user_id: str,
@@ -148,7 +263,7 @@ async def set_custom_motivation(
     return await asyncio.to_thread(_set_motivation_sync)
 
 
-# --- NEW: Endpoint to clear the custom motivation ---
+# --- This endpoint is for FACULTY to clear their override ---
 @router.delete("/motivation/{user_id}", status_code=status.HTTP_200_OK)
 async def clear_custom_motivation(
     user_id: str,
@@ -174,7 +289,7 @@ async def clear_custom_motivation(
     return await asyncio.to_thread(_clear_motivation_sync)
 
 
-# --- UPDATED: Endpoint logic is now cleaner and more robust ---
+# --- This endpoint sends a push notification ---
 @router.post("/send_reminder/{user_id}", status_code=status.HTTP_200_OK)
 async def send_study_reminder(
     user_id: str,
