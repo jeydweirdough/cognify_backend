@@ -1,4 +1,4 @@
-# routes/profiles.py
+# jeydweirdough/cognify_backend/cognify_backend-2ddc5659a372ba436d601e39b75e48d77a00069d/routes/profiles.py
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Body, status
 from datetime import datetime
@@ -8,7 +8,10 @@ from core.security import allowed_users
 import asyncio
 from typing import Dict, Any, Optional, List
 from database.models import UserProfileBase, UserProfileModel
-from pydantic import BaseModel, EmailStr
+
+# --- EDITED: Import 'Field' ---
+from pydantic import BaseModel, EmailStr, Field 
+
 from routes import auth
 from services import profile_service
 from google.cloud.firestore_v1.base_query import FieldFilter # Import FieldFilter
@@ -36,6 +39,10 @@ class UserProfileUpdate(BaseModel):
     pre_assessment_score: Optional[float] = None
     ai_confidence: Optional[float] = None
     current_module: Optional[str] = None
+    
+    # --- NEW: ADD THIS FIELD FOR MOBILE ---
+    fcm_token: Optional[str] = None
+    # --- END OF NEW FIELD ---
 
 # ... (build_login_like_response and _get_auth_email are fine) ...
 def build_login_like_response(uid: str, email: Optional[str], token: str, refresh_token: str, profile: Dict[str, Any], message: str):
@@ -192,3 +199,34 @@ async def delete_profile(user_id: str, decoded=Depends(allowed_users(["admin"]))
         return None
     except HTTPException as e:
         raise e
+
+
+# --- NEW: ADD THIS SCHEMA AND ENDPOINT FOR THE MOBILE APP ---
+
+class DeviceTokenPayload(BaseModel):
+    """Schema for receiving the FCM token from the mobile app."""
+    fcm_token: str = Field(..., description="Firebase Cloud Messaging device token")
+
+@router.post("/register_device", status_code=status.HTTP_200_OK)
+async def register_device_token(
+    payload: DeviceTokenPayload,
+    decoded=Depends(allowed_users(["student"])) # Only students can register their own device
+):
+    """
+    [Student Only] Registers or updates the FCM device token for the
+    currently authenticated student to enable push notifications.
+    """
+    caller_uid = decoded.get("uid")
+    
+    try:
+        # Use the UserProfileUpdate schema to update just the fcm_token
+        update_data = UserProfileUpdate(fcm_token=payload.fcm_token)
+        await profile_service.update(caller_uid, update_data)
+        return {"message": "Device registered successfully"}
+    except HTTPException as e:
+        # Re-raise known HTTP exceptions
+        raise e
+    except Exception as e:
+        # Catch any other potential errors
+        print(f"Error registering device for {caller_uid}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to register device: {e}")

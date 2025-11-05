@@ -1,3 +1,4 @@
+
 from pydantic import (
     BaseModel, 
     Field, 
@@ -6,7 +7,6 @@ from pydantic import (
     model_validator
 )
 from typing import Optional, List, Dict, Any
-# --- FIX: Import 'timezone' ---
 import datetime
 from datetime import timezone
 import math # Used for float comparison
@@ -135,6 +135,10 @@ class UserProfileBase(BaseModel):
     ai_confidence: Optional[float] = None
     current_module: Optional[str] = None
     progress: Optional[StudentProgress] = None
+
+    # --- NEW: ADD THIS FIELD FOR MOBILE PUSH NOTIFICATIONS ---
+    fcm_token: Optional[str] = Field(default=None, description="Firebase Cloud Messaging device token for push notifications")
+    # --- END OF NEW FIELD ---
 
     @field_validator("ai_confidence")
     @classmethod
