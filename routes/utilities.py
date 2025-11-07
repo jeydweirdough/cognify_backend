@@ -1,4 +1,5 @@
-# routes/utilities.py
+# jeydweirdough/cognify_backend/cognify_backend-2c9bd547ece812c69eb03e791dc56811f9fbe7c8/routes/utilities.py
+
 from fastapi import APIRouter, HTTPException, Depends, status
 from core.security import allowed_users
 from core.firebase import db
@@ -248,16 +249,16 @@ async def set_custom_motivation(
         try:
             doc_ref = db.collection(ANALYTICS_COLLECTION).document(user_id)
             
-            # Use .update() to set the new field
-            doc_ref.update({
+            # --- THIS IS THE FIX ---
+            # Use .set(..., merge=True) to create or update the doc
+            doc_ref.set({
                 "custom_motivation": payload.model_dump()
-            })
+            }, merge=True)
+            # --- END FIX ---
+            
             return {"message": "Custom motivation set successfully."}
         except Exception as e:
             print(f"Error setting custom motivation: {e}")
-            # Check if the doc doesn't exist
-            if "Not found" in str(e):
-                raise HTTPException(status_code=404, detail="Student analytics report not found. Cannot set motivation.")
             raise HTTPException(status_code=500, detail="Failed to set custom motivation.")
     
     return await asyncio.to_thread(_set_motivation_sync)
@@ -338,4 +339,3 @@ async def send_study_reminder(
     await asyncio.to_thread(_send_notification_sync)
     
     return {"message": "Reminder sent to processing queue."}
-

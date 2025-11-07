@@ -14,7 +14,7 @@ sys.path.append(str(BASE_DIR))
 
 from core.firebase import db
 # --- FIX: Import the new student list ---
-from config import *
+from .config import *
 
 # This imports the actual models from your app to ensure data is correct
 from database.models import (
@@ -154,7 +154,8 @@ async def populate_test_data():
     # 1. Create test Subject and TOS
     subject_ref = db.collection("subjects").document(TEST_SUBJECT_ID)
     subject_data = Subject(subject_id=TEST_SUBJECT_ID, **SAMPLE_SUBJECT_DATA).model_dump(exclude_none=True)
-    subject_ref.set(subject_data)
+    # --- FIX: Add the 'deleted' field so the API query can find it ---
+    subject_ref.set({**subject_data, "deleted": False})
     print(f"✅ Created test subject: {TEST_SUBJECT_ID}")
 
     tos_ref = db.collection("tos").document(TEST_TOS_ID)

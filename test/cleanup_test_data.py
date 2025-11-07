@@ -10,7 +10,7 @@ sys.path.append(str(BASE_DIR))
 # ----------------------------------
 
 from core.firebase import db
-from config import TEST_PREFIX
+from .config import TEST_PREFIX
 # --- FIX: Import FieldFilter for the query ---
 from google.cloud.firestore_v1.base_query import FieldFilter
 
