@@ -1,6 +1,7 @@
+# routes/quizzes.py
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List
-from database.models import Quiz, QuizBase
+from typing import List, Optional
+from database.models import Quiz, QuizBase, PaginatedResponse
 from services import quiz_service
 from core.security import allowed_users
 
@@ -13,13 +14,27 @@ async def create_quiz(payload: QuizBase):
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.get("/", response_model=List[Quiz])
-async def list_quizzes(decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
-    return await quiz_service.get_all()
+@router.get("/", response_model=PaginatedResponse[Quiz])
+async def list_quizzes(
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await quiz_service.get_all(limit=limit, start_after=start_after)
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
-@router.get("/deleted", response_model=List[Quiz], dependencies=[Depends(allowed_users(["admin"]))])
-async def list_deleted_quizzes(decoded=Depends(allowed_users(["admin"]))):
-    return await quiz_service.get_all(deleted_status="deleted-only")
+@router.get("/deleted", response_model=PaginatedResponse[Quiz], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_quizzes(
+    decoded=Depends(allowed_users(["admin"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await quiz_service.get_all(
+        deleted_status="deleted-only", 
+        limit=limit, 
+        start_after=start_after
+    )
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
 @router.get("/{id}", response_model=Quiz)
 async def get_quiz(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):

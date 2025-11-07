@@ -1,10 +1,12 @@
 # services/generic_service.py
 from core.firebase import db
 from database.models import get_current_iso_time, TimestampModel
-from typing import List, Optional, Dict, Any, Type, TypeVar, Literal
+from typing import List, Optional, Dict, Any, Type, TypeVar, Literal, Tuple
 from pydantic import BaseModel, ValidationError
 import asyncio
 from google.cloud.firestore_v1.base_query import FieldFilter
+# --- NEW: Import for cursor pagination ---
+from google.cloud.firestore_v1.document import DocumentSnapshot
 from fastapi import HTTPException, status
 
 # Generic types for our models
@@ -17,6 +19,8 @@ class FirestoreModelService:
     A generic reusable *async* service for Firestore CRUD operations
     that automatically handles Pydantic model validation, timestamps,
     and soft-delete/restore functionality.
+    
+    UPDATED: Now supports cursor-based pagination.
     """
     def __init__(self, collection_name: str, model: Type[ModelType]):
         self.collection_name = collection_name
@@ -26,9 +30,16 @@ class FirestoreModelService:
 
     async def get_all(
         self, 
-        deleted_status: Literal["non-deleted", "deleted-only", "all"] = "non-deleted"
-    ) -> List[ModelType]:
-        """Fetches documents with an option to filter by deleted status."""
+        deleted_status: Literal["non-deleted", "deleted-only", "all"] = "non-deleted",
+        limit: int = 20,
+        start_after: Optional[str] = None
+    ) -> Tuple[List[ModelType], Optional[str]]:
+        """
+        Fetches documents with an option to filter by deleted status
+        and support for pagination.
+        
+        Returns a tuple: (list_of_items, last_document_id)
+        """
         def _get_all_sync():
             items = []
             query = self.db
@@ -40,14 +51,30 @@ class FirestoreModelService:
                 elif deleted_status == "deleted-only":
                     query = query.where(filter=FieldFilter("deleted", "==", True))
             
-            for doc in query.stream():
+            # --- NEW: Pagination Logic ---
+            if start_after:
+                try:
+                    start_doc = self.db.document(start_after).get()
+                    if start_doc.exists:
+                        query = query.start_after(start_doc)
+                except Exception as e:
+                    print(f"Warning: Invalid start_after document ID '{start_after}': {e}")
+            
+            # Apply limit and get the documents
+            docs = list(query.limit(limit).stream())
+            # --- END: Pagination Logic ---
+            
+            for doc in docs:
                 data = doc.to_dict()
                 data["id"] = doc.id
                 try:
                     items.append(self.model.model_validate(data))
                 except ValidationError as e:
                     print(f"Warning: Skipping document {doc.id} in 'get_all' due to validation error: {e}")
-            return items
+            
+            # Get the ID of the last document for the next cursor
+            last_doc_id = docs[-1].id if docs else None
+            return items, last_doc_id
         
         return await asyncio.to_thread(_get_all_sync)
 
@@ -64,7 +91,6 @@ class FirestoreModelService:
             
             data = doc.to_dict()
             
-            # This is a Python conditional, it's fast and requires no index
             if (data.get("deleted") == True and 
                 not include_deleted and 
                 self._has_timestamps):
@@ -75,7 +101,6 @@ class FirestoreModelService:
             try:
                 return self.model.model_validate(data)
             except ValidationError as e:
-                # This catches the "bad data" error (e.g. missing 'user_id' field)
                 print(f"Warning: Document {doc_id} failed validation and will be skipped. Error: {e}")
                 return None
         
@@ -149,7 +174,7 @@ class FirestoreModelService:
         def _update_sync():
             doc_ref = self.db.document(doc_id)
             if not doc_ref.get().exists:
-                raise HTTPException(status.HTTP_4404_NOT_FOUND, "Document not found")
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
             
             data_dict = data.model_dump(exclude_unset=True) 
 
@@ -165,35 +190,51 @@ class FirestoreModelService:
         
         return await asyncio.to_thread(_update_sync)
 
-    async def where(self, field: str, operator: str, value: Any) -> List[ModelType]:
+    async def where(
+        self, 
+        field: str, 
+        operator: str, 
+        value: Any, 
+        limit: int = 20, 
+        start_after: Optional[str] = None
+    ) -> Tuple[List[ModelType], Optional[str]]:
         """
         Performs an efficient 'where' query that ALSO filters for
-        non-deleted items at the database level.
+        non-deleted items at the database level and supports pagination.
         
-        THIS WILL REQUIRE COMPOSITE INDEXES, which is correct.
+        Returns a tuple: (list_of_items, last_document_id)
         """
         def _where_sync():
             items = []
             
-            # --- THIS IS THE FIX ---
             # 1. Start the query on the field you requested
             query = self.db.where(filter=FieldFilter(field, operator, value))
             
             # 2. Add the 'deleted' filter to the DATABASE QUERY
-            #    This makes the query efficient and avoids wasted reads.
             if self._has_timestamps:
                 query = query.where(filter=FieldFilter("deleted", "!=", True))
+            
+            # --- NEW: Pagination Logic ---
+            if start_after:
+                try:
+                    start_doc = self.db.document(start_after).get()
+                    if start_doc.exists:
+                        query = query.start_after(start_doc)
+                except Exception as e:
+                    print(f"Warning: Invalid start_after document ID '{start_after}': {e}")
+            
+            docs = list(query.limit(limit).stream())
+            # --- END: Pagination Logic ---
                            
-            for doc in query.stream():
+            for doc in docs:
                 data = doc.to_dict()
-                
-                # We no longer need the Python 'if' check here
-                
                 data["id"] = doc.id
                 try:
                     items.append(self.model.model_validate(data))
                 except ValidationError as e:
                     print(f"Warning: Skipping document {doc.id} in 'where' query due to validation error: {e}")
-            return items
+            
+            last_doc_id = docs[-1].id if docs else None
+            return items, last_doc_id
         
         return await asyncio.to_thread(_where_sync)

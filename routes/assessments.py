@@ -1,6 +1,7 @@
+# routes/assessments.py
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List
-from database.models import Assessment, AssessmentBase
+from typing import List, Optional
+from database.models import Assessment, AssessmentBase, PaginatedResponse
 from services import assessment_service
 from core.security import allowed_users
 
@@ -13,13 +14,27 @@ async def create_assessment(payload: AssessmentBase):
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.get("/", response_model=List[Assessment])
-async def list_assessments(decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
-    return await assessment_service.get_all()
+@router.get("/", response_model=PaginatedResponse[Assessment])
+async def list_assessments(
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await assessment_service.get_all(limit=limit, start_after=start_after)
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
-@router.get("/deleted", response_model=List[Assessment], dependencies=[Depends(allowed_users(["admin"]))])
-async def list_deleted_assessments(decoded=Depends(allowed_users(["admin"]))):
-    return await assessment_service.get_all(deleted_status="deleted-only")
+@router.get("/deleted", response_model=PaginatedResponse[Assessment], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_assessments(
+    decoded=Depends(allowed_users(["admin"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await assessment_service.get_all(
+        deleted_status="deleted-only", 
+        limit=limit, 
+        start_after=start_after
+    )
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
 @router.get("/{id}", response_model=Assessment)
 async def get_assessment(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):

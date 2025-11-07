@@ -1,3 +1,4 @@
+# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -7,7 +8,8 @@ from routes import (
     auth, profiles, status, activities, assessments, 
     modules, quizzes, recommendations, tos, 
     subjects, analytics, 
-    utilities  # --- NEW: Import utilities ---
+    utilities,
+    generated_content
 )
 
 app = FastAPI(
@@ -39,6 +41,7 @@ app.include_router(tos.router)
 app.include_router(subjects.router)
 app.include_router(analytics.router)
 app.include_router(utilities.router)
+app.include_router(generated_content.router)
 
 @app.get("/")
 def root():

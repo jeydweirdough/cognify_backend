@@ -1,29 +1,20 @@
+# routes/modules.py
 from fastapi import APIRouter, HTTPException, status, Depends
-# --- NEW: Added UploadFile, File ---
 from fastapi import UploadFile, File
-from typing import List, Dict
-from database.models import Module, ModuleBase
+from typing import List, Dict, Optional
+from database.models import Module, ModuleBase, PaginatedResponse
 from services import module_service
 from core.security import allowed_users
-# --- NEW: Added storage and uuid ---
 from firebase_admin import storage
 import uuid
 
 router = APIRouter(prefix="/modules", tags=["Modules"])
 
-# --- NEW ENDPOINT FOR FILE UPLOADS ---
 @router.post("/upload", response_model=Dict[str, str])
 async def upload_module_file(
     file: UploadFile = File(...),
     decoded=Depends(allowed_users(["admin", "faculty_member"]))
 ):
-    """
-    [Admin/Faculty] Uploads a module file (like a PDF) to
-    Firebase Storage and returns the public URL.
-    """
-    
-    # 1. Get the storage bucket
-    #    This requires your core/firebase.py to be initialized with 'storageBucket'
     try:
         bucket = storage.bucket()
     except Exception as e:
@@ -31,40 +22,27 @@ async def upload_module_file(
             status_code=500,
             detail=f"Firebase Storage bucket not configured. Make sure FIREBASE_STORAGE_BUCKET is set. Error: {e}"
         )
-
-    # 2. Create a unique, secure filename
-    #    We use a UUID to prevent filename collisions and guessing
     try:
-        # Try to get the file extension, default to .bin if not found
         ext = file.filename.split('.')[-1]
         if len(ext) > 5 or len(ext) < 2:
-            ext = "bin" # Default for unknown
+            ext = "bin"
     except:
         ext = "bin"
         
     unique_filename = f"modules/{uuid.uuid4()}.{ext}"
     
-    # 3. Upload the file
     try:
         blob = bucket.blob(unique_filename)
-        
-        # Use file.file which is the SpooledTemporaryFile
         blob.upload_from_file(
             file.file,
             content_type=file.content_type
         )
-        
-        # 4. Make the file public (so students can read it)
         blob.make_public()
-        
-        # 5. Return the public URL
         return {"file_url": blob.public_url}
-        
     except Exception as e:
         print(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
     finally:
-        # 6. Always close the file
         await file.close()
 
 @router.post("/", response_model=Module, status_code=status.HTTP_201_CREATED, dependencies=[Depends(allowed_users(["admin", "faculty_member"]))])
@@ -74,13 +52,27 @@ async def create_module(payload: ModuleBase):
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-@router.get("/", response_model=List[Module])
-async def list_modules(decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
-    return await module_service.get_all()
+@router.get("/", response_model=PaginatedResponse[Module])
+async def list_modules(
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await module_service.get_all(limit=limit, start_after=start_after)
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
-@router.get("/deleted", response_model=List[Module], dependencies=[Depends(allowed_users(["admin"]))])
-async def list_deleted_modules(decoded=Depends(allowed_users(["admin"]))):
-    return await module_service.get_all(deleted_status="deleted-only")
+@router.get("/deleted", response_model=PaginatedResponse[Module], dependencies=[Depends(allowed_users(["admin"]))])
+async def list_deleted_modules(
+    decoded=Depends(allowed_users(["admin"])),
+    limit: int = 20,
+    start_after: Optional[str] = None
+):
+    items, last_id = await module_service.get_all(
+        deleted_status="deleted-only", 
+        limit=limit, 
+        start_after=start_after
+    )
+    return PaginatedResponse(items=items, last_doc_id=last_id)
 
 @router.get("/{id}", response_model=Module)
 async def get_module(id: str, decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))):
