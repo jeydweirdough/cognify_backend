@@ -158,11 +158,15 @@ async def update_profile(
     except HTTPException as e:
         raise e
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(allowed_users(["admin"]))])
+@router.delete("/{user_id}", response_model=UserProfileModel, dependencies=[Depends(allowed_users(["admin"]))])
 async def delete_profile(user_id: str, decoded=Depends(allowed_users(["admin"]))):
     try:
         await profile_service.delete(user_id)
-        return None
+        
+        updated_profile = await profile_service.get(user_id, include_deleted=True)
+        if not updated_profile:
+             raise HTTPException(status_code=404, detail="Profile not found after delete.")
+        return updated_profile
     except HTTPException as e:
         raise e
 
