@@ -16,11 +16,13 @@ from services import (
     generated_flashcards_service,
     tos_service  # --- NEW: Need this to get TOS ---
 )
-from services.ai_content_generator import (
-    generate_summary_from_text, 
-    generate_quiz_from_text,
-    generate_flashcards_from_text
-)
+# --- FIX: Removed unused imports ---
+# from services.ai_content_generator import (
+#     generate_summary_from_text, 
+#     generate_quiz_from_text,
+#     generate_flashcards_from_text
+# )
+# --- END FIX ---
 from core.security import allowed_users
 from core.firebase import db # --- NEW: Need this for subject ---
 import httpx

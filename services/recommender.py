@@ -18,14 +18,18 @@ from database.models import RecommendationBase, Subject, TOS
 
 async def _fetch_student_activities(student_id: str) -> List[Dict[str, Any]]:
     """Fetch student's activities sorted by timestamp."""
-    activities = await activity_service.where("student_id", "==", student_id)
+    
+    # --- FIX 1: The model field is 'user_id', not 'student_id'. ---
+    activities, _ = await activity_service.where("user_id", "==", student_id)
+    # --- END FIX ---
+
     activities_data = [act.model_dump() for act in activities]
     activities_data.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
     return activities_data
 
 async def _fetch_modules_for_subject(subject_id: str) -> List[Dict[str, Any]]:
     """Fetch modules for a subject."""
-    modules = await module_service.where("subject_id", "==", subject_id)
+    modules, _ = await module_service.where("subject_id", "==", subject_id)
     return [m.model_dump() for m in modules]
 
 async def _fetch_active_tos(subject_id: str) -> Dict[str, Any]:
@@ -46,7 +50,7 @@ async def _fetch_active_tos(subject_id: str) -> Dict[str, Any]:
     if not subject or not subject.active_tos_id:
         print(f"Warning: No active TOS specified for subject {subject_id}")
         # Fallback: Try to find *any* TOS for the subject
-        all_tos = await tos_service.where("subject_id", "==", subject_id)
+        all_tos, _ = await tos_service.where("subject_id", "==", subject_id)
         if not all_tos:
             return {}
         return all_tos[0].model_dump() # Return the first one found
@@ -142,9 +146,11 @@ async def pick_recommendations_for_student(student_id: str, max_recommendations:
         bloom_focus = module.get("bloom_level")
         stats = topic_stats.get(bloom_focus, {"avg_score": 0, "avg_completion": 0})
         
+        # --- FIX 2: The model field is 'user_id', not 'student_id'. ---
         rec_payload = RecommendationBase(
-            student_id=student_id,
+            user_id=student_id,
             subject_id=subject_id,
+        # --- END FIX ---
             recommended_topic=module.get("title"),
             recommended_module=module.get("id"), # Use the module's 'id'
             bloom_focus=bloom_focus,
