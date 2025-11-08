@@ -90,6 +90,7 @@ async def _fetch_and_simplify_active_tos(subject_id: str) -> str:
 async def _process_pdf_and_generate(module_id: str):
     """
     Background task to download, read, fetch TOS, and generate content.
+    REFACTORED: Now uses a single, unified AI call.
     """
     print(f"Starting background generation for module: {module_id}")
     try:
@@ -98,16 +99,16 @@ async def _process_pdf_and_generate(module_id: str):
             print(f"Error: Module {module_id} not found or missing URL/Subject ID.")
             return
 
-        # 1. Fetch and simplify the active TOS (NEW)
+        # 1. Fetch and simplify the active TOS (Unchanged)
         tos_structure_str = await _fetch_and_simplify_active_tos(module.subject_id)
 
-        # 2. Download the PDF file from the public URL
+        # 2. Download the PDF file from the public URL (Unchanged)
         async with httpx.AsyncClient() as client:
             response = await client.get(module.material_url, timeout=30.0)
             response.raise_for_status()
             pdf_data = io.BytesIO(response.content)
 
-        # 3. Extract text using PyMuPDF (fitz)
+        # 3. Extract text using PyMuPDF (fitz) (Unchanged)
         full_text = ""
         with fitz.open(stream=pdf_data, filetype="pdf") as doc:
             for page in doc:
@@ -120,60 +121,61 @@ async def _process_pdf_and_generate(module_id: str):
         
         print(f"Successfully extracted {char_count} chars from {module.material_url}")
 
-        # 4. Generate Summary (Updated)
+        # --- 4. REFACTORED: Call the AI *ONCE* ---
         try:
-            summary_resp = await generate_summary_from_text(full_text, tos_structure_str)
+            # Import the new unified function
+            from services.ai_content_generator import generate_unified_learning_package
+            
+            # Call our single, powerful function
+            package = await generate_unified_learning_package(full_text, tos_structure_str)
+            
+            # --- 5. SPLIT the package and SAVE to the 3 collections ---
+            
+            # 5a. Save the Summary
             summary_payload = GeneratedSummaryBase(
                 module_id=module_id,
                 subject_id=module.subject_id,
-                summary_text=summary_resp.summary,
+                summary_text=package.summary, # From the package
                 source_url=module.material_url,
                 source_char_count=char_count,
-                tos_topic_title=summary_resp.tos_topic_title,
-                aligned_bloom_level=summary_resp.aligned_bloom_level
+                tos_topic_title=package.tos_topic_title,
+                aligned_bloom_level=package.aligned_bloom_level
             )
             created_summary = await generated_summary_service.create(summary_payload)
             await module_service.update(module_id, {"generated_summary_id": created_summary.id})
             print(f"Successfully generated summary {created_summary.id} for module {module_id}")
-        except Exception as e:
-            print(f"Failed to generate summary for {module_id}: {e}")
 
-        # 5. Generate Quiz (Updated)
-        try:
-            quiz_resp = await generate_quiz_from_text(full_text, tos_structure_str)
+            # 5b. Save the Quiz
             quiz_payload = GeneratedQuizBase(
                 module_id=module_id,
                 subject_id=module.subject_id,
-                questions=quiz_resp.questions,
+                questions=package.questions, # From the package
                 source_url=module.material_url,
                 source_char_count=char_count,
-                tos_topic_title=quiz_resp.tos_topic_title,
-                aligned_bloom_level=quiz_resp.aligned_bloom_level
+                tos_topic_title=package.tos_topic_title,
+                aligned_bloom_level=package.aligned_bloom_level
             )
             created_quiz = await generated_quiz_service.create(quiz_payload)
             await module_service.update(module_id, {"generated_quiz_id": created_quiz.id})
             print(f"Successfully generated quiz {created_quiz.id} for module {module_id}")
-        except Exception as e:
-            print(f"Failed to generate quiz for {module_id}: {e}")
 
-        # 6. Generate Flashcards (Updated)
-        try:
-            flashcards_resp = await generate_flashcards_from_text(full_text, tos_structure_str)
+            # 5c. Save the Flashcards
             flashcards_payload = GeneratedFlashcardsBase(
                 module_id=module_id,
                 subject_id=module.subject_id,
-                flashcards=flashcards_resp.flashcards,
+                flashcards=package.flashcards, # From the package
                 source_url=module.material_url,
                 source_char_count=char_count,
-                tos_topic_title=flashcards_resp.tos_topic_title,
-                aligned_bloom_level=flashcards_resp.aligned_bloom_level
+                tos_topic_title=package.tos_topic_title,
+                aligned_bloom_level=package.aligned_bloom_level
             )
             created_flashcards = await generated_flashcards_service.create(flashcards_payload)
             await module_service.update(module_id, {"generated_flashcards_id": created_flashcards.id})
             print(f"Successfully generated flashcards {created_flashcards.id} for module {module_id}")
+
         except Exception as e:
-            print(f"Failed to generate flashcards for {module_id}: {e}")
-            
+            print(f"Failed to generate unified package for {module_id}: {e}")
+
     except httpx.HTTPStatusError as e:
         print(f"Failed to download PDF {module.material_url}: {e}")
     except Exception as e:

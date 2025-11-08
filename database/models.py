@@ -10,7 +10,7 @@ from pydantic.generics import GenericModel
 from typing import Optional, List, Dict, Any, Generic, TypeVar
 import datetime
 from datetime import timezone
-import math # Used for float comparison
+import math
 
 # ========== Pagination Model (Unchanged) ===========
 T = TypeVar("T")
@@ -18,7 +18,7 @@ class PaginatedResponse(GenericModel, Generic[T]):
     items: List[T]
     last_doc_id: Optional[str] = Field(None, description="The ID of the last document in the list, used for 'start_after' in the next request.")
 
-# ========== Root Models (Unchanged) ===========
+# ========== Root Models ===========
 class StudentProgress(RootModel):
     root: Dict[str, float]
     @field_validator("root")
@@ -119,8 +119,10 @@ class BaseQuestion(BaseModel):
     question: Optional[str] = None
     options: Optional[List[str]] = None
     answer: Optional[Any] = None
+
 class Question(BaseQuestion):
     question_id: str
+
 class AssessmentBase(BaseModel):
     type: Optional[str] = None
     subject_id: Optional[str] = None
@@ -128,11 +130,12 @@ class AssessmentBase(BaseModel):
     instructions: Optional[str] = None
     total_items: Optional[int] = None
     questions: Optional[List[Question]] = None
+
 class Assessment(AssessmentBase, TimestampModel):
     id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
 
-# --- Module (Updated) ---
+# --- Module ---
 class ModuleBase(BaseModel):
     subject_id: Optional[str] = None
     title: Optional[str] = None
@@ -148,7 +151,7 @@ class Module(ModuleBase, TimestampModel):
     id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
 
-# --- (Quiz, Recommendation models unchanged) ---
+# --- (Quiz) ---
 class QuizBase(BaseQuestion):
     subject_id: Optional[str] = None
 class Quiz(QuizBase, TimestampModel):
@@ -169,7 +172,7 @@ class Recommendation(RecommendationBase, TimestampModel):
     def to_dict(self): return self.model_dump(exclude_none=True)
 
 
-# --- AI-Generated Content Models (UPDATED) ---
+# --- AI-Generated Content Models ---
 
 # --- Generated Summary ---
 class GeneratedSummaryBase(BaseModel):
@@ -191,7 +194,6 @@ class GeneratedQuestion(BaseModel):
     question: str
     options: List[str]
     answer: str
-    # --- UPDATED: More specific alignment ---
     tos_topic_title: Optional[str] = None
     aligned_bloom_level: Optional[str] = None
 
@@ -201,7 +203,6 @@ class GeneratedQuizBase(BaseModel):
     questions: List[GeneratedQuestion]
     source_url: str
     source_char_count: int
-    # --- NEW: TOS Alignment ---
     tos_topic_title: Optional[str] = None
     aligned_bloom_level: Optional[str] = None
 
@@ -217,7 +218,6 @@ class GeneratedQuiz(GeneratedQuizBase, TimestampModel):
 class GeneratedFlashcard(BaseModel):
     question: str
     answer: str
-    # --- UPDATED: More specific alignment ---
     tos_topic_title: Optional[str] = None
     aligned_bloom_level: Optional[str] = None
 
@@ -239,9 +239,8 @@ class GeneratedFlashcards(GeneratedFlashcardsBase, TimestampModel):
             data['flashcards'] = [card.model_dump(exclude_none=True) for card in self.flashcards]
         return data
 
-# --- END AI-Generated Models ---
 
-# --- TOS & Subject Models (Unchanged) ---
+# --- TOS & Subject Models ---
 class SubjectBase(BaseModel):
     subject_name: str
     pqf_level: Optional[int] = None
@@ -283,6 +282,7 @@ class TOSBase(BaseModel):
             if not math.isclose(total_sum, 1.0):
                  raise ValueError(f"Difficulty distribution values must sum to 1.0. Current sum: {total_sum}")
         return self
+    
 class TOS(TOSBase, TimestampModel):
     id: str
     def to_dict(self):

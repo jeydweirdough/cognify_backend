@@ -16,6 +16,8 @@ from firebase_admin import messaging
 import requests
 import time
 
+from services import analytics_service
+
 router = APIRouter(prefix="/utilities", tags=["Utilities"])
 
 # --- UPDATED: Added more fallback messages ---
@@ -142,25 +144,32 @@ async def generate_new_motivational_message(
     """
     
     def _generate_and_save_sync():
-        # 1. Fetch the student's *existing* analytics report (1 read)
-        doc_ref = db.collection(ANALYTICS_COLLECTION).document(user_id)
-        doc = doc_ref.get()
-        if not doc.exists:
-            raise HTTPException(status_code=404, detail="Analytics report not found. Cannot generate quote.")
+        # --- THIS IS THE REFACTORED PART ---
+        # 1. Fetch the student's *live* analytics (async call in thread)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            report_data = loop.run_until_complete(analytics_service.get_live_analytics(user_id))
+        finally:
+            loop.close()
         
-        report_data = doc.to_dict()
+        if not report_data:
+            raise HTTPException(status_code=404, detail="No analytics data found. Cannot generate quote.")
+        
         report_data["student_id"] = user_id # Ensure ID is present
+        # --- END REFACTORED PART ---
 
         # 2. Call the blocking Gemini API function
         new_quote = _call_gemini_api_sync(report_data)
 
         # 3. Save the new quote back to the document
-        # This also clears any custom faculty quote, as the student
-        # has requested a new one.
-        doc_ref.update({
+        # This uses the *same* "student_analytics_reports" collection,
+        # but just for storing the quote. This is fine.
+        doc_ref = db.collection(ANALYTICS_COLLECTION).document(user_id)
+        doc_ref.set({
             "ai_motivation": new_quote,
             "custom_motivation": None
-        })
+        }, merge=True) # Use set with merge=True to create if not exists
         
         return {
             "quote": new_quote,

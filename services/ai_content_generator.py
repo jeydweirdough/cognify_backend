@@ -9,54 +9,41 @@ from database.models import GeneratedQuestion, GeneratedFlashcard
 API_KEY = "" 
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={API_KEY}"
 
-# --- Pydantic Models for AI Response Validation (Updated) ---
-class GeneratedSummaryResponse(BaseModel):
+# --- 1. NEW: Pydantic Model for a SINGLE AI Response ---
+# This model will validate the *entire* package from the AI
+class UnifiedLearningPackage(BaseModel):
     summary: str
-    tos_topic_title: Optional[str] = None
-    aligned_bloom_level: Optional[str] = None
-
-class GeneratedQuizResponse(BaseModel):
     questions: List[GeneratedQuestion]
-    tos_topic_title: Optional[str] = None
-    aligned_bloom_level: Optional[str] = None
-    
-class GeneratedFlashcardsResponse(BaseModel):
     flashcards: List[GeneratedFlashcard]
+    # We can also ask the AI for the *overall* alignment
     tos_topic_title: Optional[str] = None
     aligned_bloom_level: Optional[str] = None
 
-# --- System Prompts (UPDATED for TOS Alignment) ---
-SUMMARY_SYSTEM_PROMPT = (
-    "You are an expert academic assistant. Your task is to read the provided text "
-    "from a psychology module and generate a concise, professional summary of the key "
-    "concepts, definitions, and theories. Use bullet points for clarity. "
-    "**You MUST also align this summary with the *most relevant* topic from the provided Table of Specifications (TOS).** "
+# --- 2. NEW: The Unified System Prompt ---
+# This one prompt replaces the three old ones.
+UNIFIED_GENERATION_SYSTEM_PROMPT = (
+    "You are an expert academic assistant and test creator. Your task is to "
+    "read the provided text from a psychology module and the provided "
+    "Table of Specifications (TOS). "
+    "Based *only* on the text, you must generate a complete learning package. "
+    "You MUST align all content with the *most relevant* topic and "
+    "Bloom's level from the TOS. "
     "Respond ONLY with a valid JSON object in the format: "
-    "{\"summary\": \"...your summary...\", \"tos_topic_title\": \"(e.g., Theories)\", \"aligned_bloom_level\": \"(e.g., understanding)\"}"
+    "{"
+    "  \"tos_topic_title\": \"(e.g., Theories)\", "
+    "  \"aligned_bloom_level\": \"(e.g., applying)\", "
+    "  \"summary\": \"...your concise summary...\", "
+    "  \"questions\": ["
+    "    {\"question\": \"...\", \"options\": [\"A\", \"B\", \"C\", \"D\"], \"answer\": \"A\", \"tos_topic_title\": \"(e.g., Theories)\", \"aligned_bloom_level\": \"(e.g., remembering)\"}"
+    "  ], "
+    "  \"flashcards\": ["
+    "    {\"question\": \"What is...?\", \"answer\": \"It is...\", \"tos_topic_title\": \"(e.g., Sikolohiyang Filipino)\", \"aligned_bloom_level\": \"(e.g., remembering)\"}"
+    "  ]"
+    "}"
+    "Generate exactly 5 quiz questions and 10 flashcards."
 )
 
-QUIZ_SYSTEM_PROMPT = (
-    "You are an expert psychology test creator. Your task is to read the provided text "
-    "from a psychology module and generate exactly 5 multiple-choice questions based *only* "
-    "on the text. "
-    "**Each question MUST be aligned with a *specific topic* and *Bloom's level* from the provided Table of Specifications (TOS).** "
-    "The *overall* quiz should also align with the *most relevant* topic. "
-    "Respond ONLY with a valid JSON object in the format: "
-    "{\"tos_topic_title\": \"(e.g., Theories)\", \"aligned_bloom_level\": \"(e.g., applying)\", "
-    "\"questions\": [{\"question\": \"...\", \"options\": [\"A\", \"B\", \"C\", \"D\"], \"answer\": \"A\", \"tos_topic_title\": \"(e.g., Theories)\", \"aligned_bloom_level\": \"(e.g., remembering)\"}]}"
-)
-
-FLASHCARDS_SYSTEM_PROMPT = (
-    "You are an expert learning assistant. Your task is to read the provided text "
-    "from a psychology module and generate 10 key flashcards. Each flashcard must be a "
-    "clear question and a concise answer based *only* on the text. "
-    "**Each flashcard MUST be aligned with a *specific topic* and *Bloom's level* from the provided Table of Specifications (TOS).** "
-    "The *overall* set should also align with the *most relevant* topic. "
-    "Respond ONLY with a valid JSON object in the format: "
-    "{\"tos_topic_title\": \"(e.g., Sikolohiyang Filipino)\", \"aligned_bloom_level\": \"(e.g., remembering)\", "
-    "\"flashcards\": [{\"question\": \"What is...?\", \"answer\": \"It is...\", \"tos_topic_title\": \"(e.g., Sikolohiyang Filipino)\", \"aligned_bloom_level\": \"(e.g., remembering)\"}]}"
-)
-
+# --- 3. REFACTORED: The API call function is now generic ---
 async def _call_gemini_api(system_prompt: str, user_query: str) -> Dict[str, Any]:
     """
     Helper function to call the Gemini API.
@@ -92,6 +79,7 @@ async def _call_gemini_api(system_prompt: str, user_query: str) -> Dict[str, Any
             print(f"AI Error: Unexpected error: {e}")
             raise ValueError(f"An unexpected error occurred with the AI service: {e}")
 
+# --- 4. REFACTORED: This function is unchanged but good ---
 def _create_generation_query(pdf_text: str, tos_structure: str) -> str:
     """Combines PDF text and TOS structure into a single query for the AI."""
     # Truncate text to avoid exceeding token limits
@@ -118,41 +106,23 @@ def _create_generation_query(pdf_text: str, tos_structure: str) -> str:
     ---[MODULE TEXT END]---
     """
 
-async def generate_summary_from_text(pdf_text: str, tos_structure: str) -> GeneratedSummaryResponse:
+# --- 5. NEW: The One Function to Rule Them All ---
+# This one function replaces the old generate_summary, generate_quiz,
+# and generate_flashcards functions.
+async def generate_unified_learning_package(pdf_text: str, tos_structure: str) -> UnifiedLearningPackage:
     """
-    Takes PDF text and TOS, returns a structured, TOS-aligned summary.
+    Takes PDF text and TOS, returns a single, structured learning
+    package containing a summary, quiz, and flashcards.
     """
     user_query = _create_generation_query(pdf_text, tos_structure)
-    json_data = await _call_gemini_api(SUMMARY_SYSTEM_PROMPT, user_query)
+    json_data = await _call_gemini_api(UNIFIED_GENERATION_SYSTEM_PROMPT, user_query)
     
     try:
-        return GeneratedSummaryResponse.model_validate(json_data)
+        # Validate the entire package at once
+        return UnifiedLearningPackage.model_validate(json_data)
     except ValidationError as e:
-        print(f"AI Validation Error (Summary): {e}")
-        raise ValueError(f"AI returned data in the wrong format for a summary: {e}")
+        print(f"AI Validation Error (Unified Package): {e}")
+        raise ValueError(f"AI returned data in the wrong format for a unified package: {e}")
 
-async def generate_quiz_from_text(pdf_text: str, tos_structure: str) -> GeneratedQuizResponse:
-    """
-    Takes PDF text and TOS, returns a structured, TOS-aligned quiz.
-    """
-    user_query = _create_generation_query(pdf_text, tos_structure)
-    json_data = await _call_gemini_api(QUIZ_SYSTEM_PROMPT, user_query)
-    
-    try:
-        return GeneratedQuizResponse.model_validate(json_data)
-    except ValidationError as e:
-        print(f"AI Validation Error (Quiz): {e}")
-        raise ValueError(f"AI returned data in the wrong format for a quiz: {e}")
-
-async def generate_flashcards_from_text(pdf_text: str, tos_structure: str) -> GeneratedFlashcardsResponse:
-    """
-    Takes PDF text and TOS, returns structured, TOS-aligned flashcards.
-    """
-    user_query = _create_generation_query(pdf_text, tos_structure)
-    json_data = await _call_gemini_api(FLASHCARDS_SYSTEM_PROMPT, user_query)
-    
-    try:
-        return GeneratedFlashcardsResponse.model_validate(json_data)
-    except ValidationError as e:
-        print(f"AI Validation Error (Flashcards): {e}")
-        raise ValueError(f"AI returned data in the wrong format for flashcards: {e}")
+# --- The old generate_summary_from_text, generate_quiz_from_text, ---
+# --- and generate_flashcards_from_text functions are now DELETED. ---

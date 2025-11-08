@@ -1,52 +1,46 @@
 # routes/analytics.py
 from fastapi import APIRouter, HTTPException, Depends
 from core.security import allowed_users
-from core.firebase import db
 import asyncio
 from typing import Dict, Any
+from datetime import datetime
+
+# --- 1. Import all our new service functions ---
+from services import analytics_service 
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & AI"])
 
-# The Firestore collection where your daily script saves the *global* report
-PREDICTIONS_COLLECTION = "daily_predictions"
-# The Firestore collection where your daily script saves the *individual* reports
-STUDENT_ANALYTICS_COLLECTION = "student_analytics_reports"
-
-
+# --- 2. RE-ADD THE GLOBAL PREDICTIONS ENDPOINT ---
 @router.get("/global_predictions")
 async def get_global_pass_fail_predictions(
     decoded=Depends(allowed_users(["admin", "faculty_member"]))
 ):
     """
-    [Admin/Faculty] Fetches the pre-calculated GLOBAL AI predictions
-    from the 'daily_predictions' collection for the main dashboard.
-    This is fast and efficient (1 read).
+    [Admin/Faculty] Fetches a LIVE, logic-based GLOBAL prediction
+    report for the main dashboard.
+    
+    NOTE: This is a heavy, on-demand calculation.
     """
-    def _fetch_predictions():
-        doc_ref = db.collection(PREDICTIONS_COLLECTION).document("latest")
-        doc = doc_ref.get()
-        if not doc.exists:
-            raise HTTPException(status_code=404, detail="Global analytics data not found. The daily job may not have run yet.")
-        return doc.to_dict()
-
     try:
-        predictions = await asyncio.to_thread(_fetch_predictions)
-        return predictions
+        global_report = await analytics_service.get_global_analytics_report()
+        global_report["last_updated"] = datetime.utcnow().isoformat()
+        return global_report
     except Exception as e:
+        print(f"Error generating global report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# --- 3. UPDATE THE STUDENT REPORT ENDPOINT ---
 @router.get("/student_report/{user_id}")
 async def get_student_analytics_report(
     user_id: str,
     decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
 ):
     """
-    [Student/Faculty/Admin] Fetches the pre-calculated, combined analytics 
-    and AI prediction report for a SINGLE student.
+    [Student/Faculty/Admin] Fetches a LIVE, on-demand analytics 
+    report for a SINGLE student.
     
-    This fulfills the "Progress and Report Module" from your manuscript.
-    It is fast and efficient (1 read).
+    This report now includes a simple, logic-based pass/fail
+    prediction (not AI).
     """
     caller_role = decoded.get("role")
     caller_uid = decoded.get("uid")
@@ -55,29 +49,21 @@ async def get_student_analytics_report(
     if caller_role == "student" and user_id != caller_uid:
         raise HTTPException(status_code=403, detail="You may only view your own analytics report.")
 
-    def _fetch_student_report():
-        doc_ref = db.collection(STUDENT_ANALYTICS_COLLECTION).document(user_id)
-        doc = doc_ref.get()
-        if not doc.exists:
-            raise HTTPException(status_code=404, detail=f"Analytics report not found for user {user_id}. The daily job may not have run yet.")
-        
-        report = doc.to_dict()
-        
-        # Ensure the report has all key parts, provide defaults if not
-        return {
-            "student_id": report.get("student_id", user_id),
-            "summary": report.get("summary", {}),
-            "performance_by_bloom": report.get("performance_by_bloom", {}),
-            "prediction": report.get("prediction", {}),
-            "ai_motivation": report.get("ai_motivation", "Keep up the hard work!"),
-            "last_updated": report.get("last_updated")
-        }
-
     try:
-        report = await asyncio.to_thread(_fetch_student_report)
-        return report
-    except HTTPException as e:
-        raise e
+        # 1. Get the live analytics (summary & bloom)
+        analytics_data = await analytics_service.get_live_analytics(user_id)
+        
+        # 2. Apply our simple prediction algorithm
+        report_with_prediction = analytics_service.apply_prediction_logic(analytics_data)
+        
+        # 3. Return the combined report
+        return {
+            "student_id": user_id,
+            "summary": report_with_prediction.get("summary", {}),
+            "performance_by_bloom": report_with_prediction.get("performance_by_bloom", {}),
+            "prediction": report_with_prediction.get("prediction", {}), # <-- This is now included
+            "last_updated": datetime.utcnow().isoformat() # Report is live
+        }
     except Exception as e:
+        print(f"Error generating live report for {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
