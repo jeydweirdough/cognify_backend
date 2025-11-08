@@ -25,7 +25,7 @@ async def get_live_analytics(student_id: str) -> Dict[str, Any]:
     if not activities_list:
         return {
             "summary": {
-                "overall_score": 0, 
+                "overall_score": 0.0, 
                 "total_activities": 0, 
                 "time_spent_sec": 0
             },
@@ -42,12 +42,15 @@ async def get_live_analytics(student_id: str) -> Dict[str, Any]:
     
     # 3. Calculate Bloom's performance
     bloom_performance = df.groupby('bloom_level')['score'].mean()
-    bloom_dict = {level: round(score, 2) for level, score in bloom_performance.items()}
+    
+    # --- FIX: Cast numpy.float64 to native Python float ---
+    bloom_dict = {level: float(round(score, 2)) for level, score in bloom_performance.items()}
     
     # 4. Calculate summary
+    # --- FIX: Cast all numpy types (int64, float64) to native Python types ---
     summary = {
-        "total_activities": len(df),
-        "overall_score": round(df['score'].mean(), 2),
+        "total_activities": int(len(df)),
+        "overall_score": float(round(df['score'].mean(), 2)),
         "time_spent_sec": int(df['duration'].sum())
     }
     
@@ -61,16 +64,18 @@ def apply_prediction_logic(analytics_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Applies the simple pass/fail algorithm to an analytics report.
     """
-    overall_score = analytics_data.get("summary", {}).get("overall_score", 0)
+    overall_score = analytics_data.get("summary", {}).get("overall_score", 0.0)
     
     # The Algorithm:
     is_passing = overall_score >= PASSING_THRESHOLD
     
+    # --- FIX: Cast numpy.bool_ to native Python bool ---
     analytics_data["prediction"] = {
-        "predicted_to_pass": is_passing,
-        "pass_probability": 100.0 if is_passing else 0.0, # Simple logic
-        "overall_score": overall_score
+        "predicted_to_pass": bool(is_passing),
+        "pass_probability": float(100.0 if is_passing else 0.0), # Simple logic
+        "overall_score": float(overall_score)
     }
+    # --- END FIX ---
     return analytics_data
 
 # --- 3. NEW FUNCTION TO GET THE GLOBAL REPORT ---
@@ -127,20 +132,24 @@ async def get_global_analytics_report() -> Dict[str, Any]:
         if report_with_prediction["prediction"]["predicted_to_pass"]:
             total_pass += 1
             
+        # --- FIX: Ensure all values added to the list are native Python types ---
         predictions_list.append({
             "student_id": student.get("id"),
             "first_name": student.get("first_name"),
             "last_name": student.get("last_name"),
-            "predicted_to_pass": report_with_prediction["prediction"]["predicted_to_pass"],
-            "overall_score": report_with_prediction["summary"]["overall_score"]
+            "predicted_to_pass": bool(report_with_prediction["prediction"]["predicted_to_pass"]),
+            "overall_score": float(report_with_prediction["summary"]["overall_score"])
         })
+        # --- END FIX ---
         
+    # --- FIX: Cast summary values to native Python types ---
     return {
         "summary": {
-            "total_students_predicted": total_students,
+            "total_students_predicted": int(total_students),
             "count_predicted_to_pass": int(total_pass),
             "count_predicted_to_fail": int(total_students - total_pass),
-            "predicted_pass_rate": round((total_pass / total_students) * 100, 2) if total_students > 0 else 0
+            "predicted_pass_rate": float(round((total_pass / total_students) * 100, 2)) if total_students > 0 else 0.0
         },
         "predictions": predictions_list
     }
+    # --- END FIX ---

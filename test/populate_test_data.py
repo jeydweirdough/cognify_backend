@@ -13,7 +13,6 @@ sys.path.append(str(BASE_DIR))
 # ----------------------------------
 
 from core.firebase import db
-# --- FIX: Import the new student list ---
 from .config import *
 
 # This imports the actual models from your app to ensure data is correct
@@ -154,14 +153,18 @@ async def populate_test_data():
     # 1. Create test Subject and TOS
     subject_ref = db.collection("subjects").document(TEST_SUBJECT_ID)
     subject_data = Subject(subject_id=TEST_SUBJECT_ID, **SAMPLE_SUBJECT_DATA).model_dump(exclude_none=True)
-    # --- FIX: Add the 'deleted' field so the API query can find it ---
-    subject_ref.set({**subject_data, "deleted": False})
+    
+    # --- FIX: Add the 'id' field for the cleanup script to find ---
+    subject_ref.set({**subject_data, "id": TEST_SUBJECT_ID, "deleted": False})
     print(f"✅ Created test subject: {TEST_SUBJECT_ID}")
 
     tos_ref = db.collection("tos").document(TEST_TOS_ID)
     tos_data = TOS(id=TEST_TOS_ID, **SAMPLE_TOS_DATA).to_dict()
+    
+    # --- FIX: Add the 'id' field for the cleanup script to find ---
     tos_ref.set({
         **tos_data,
+        "id": TEST_TOS_ID, 
         "created_at": get_iso_time(),
         "deleted": False
     })
@@ -242,4 +245,3 @@ if __name__ == "__main__":
     from services.role_service import get_role_id_by_designation
 
     asyncio.run(populate_test_data())
-

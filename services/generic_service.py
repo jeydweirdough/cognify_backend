@@ -20,7 +20,7 @@ class FirestoreModelService:
     that automatically handles Pydantic model validation, timestamps,
     and soft-delete/restore functionality.
     
-    UPDATED: Now supports cursor-based pagination.
+    UPDATED: Now supports cursor-based pagination and permanent purge.
     """
     def __init__(self, collection_name: str, model: Type[ModelType]):
         self.collection_name = collection_name
@@ -238,3 +238,61 @@ class FirestoreModelService:
             return items, last_doc_id
         
         return await asyncio.to_thread(_where_sync)
+
+    # ---
+    # --- NEW FUNCTION 1: PERMANENTLY DELETE BY ID ---
+    # ---
+    async def delete_permanent(self, doc_id: str) -> bool:
+        """
+        PERMANENTLY deletes a single document by its ID.
+        This is irreversible and does not respect soft-delete.
+        """
+        def _delete_permanent_sync():
+            doc_ref = self.db.document(doc_id)
+            if doc_ref.get().exists:
+                doc_ref.delete()
+                return True
+            return False # Document didn't exist
+        
+        return await asyncio.to_thread(_delete_permanent_sync)
+
+    # ---
+    # --- NEW FUNCTION 2: PERMANENTLY DELETE BY QUERY ---
+    # ---
+    async def purge_where(self, field: str, operator: str, value: Any) -> int:
+        """
+        PERMANENTLY deletes all documents matching a query.
+        This is irreversible and is used to clean up orphaned data.
+        
+        Returns:
+            int: The number of documents deleted.
+        """
+        def _purge_where_sync():
+            query = self.db.where(filter=FieldFilter(field, operator, value))
+            
+            deleted_count = 0
+            docs = list(query.stream()) # Get all docs at once
+            
+            if not docs:
+                return 0
+                
+            batch = db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+                deleted_count += 1
+                
+                # Firestore batches have a 500 operation limit
+                if deleted_count % 499 == 0:
+                    batch.commit()
+                    batch = db.batch()
+            
+            batch.commit() # Commit any remaining
+            return deleted_count
+
+        try:
+            deleted_count = await asyncio.to_thread(_purge_where_sync)
+            print(f"Purged {deleted_count} docs from '{self.collection_name}' where {field} {operator} {value}")
+            return deleted_count
+        except Exception as e:
+            print(f"Error purging {self.collection_name} for {value}: {e}")
+            return 0
