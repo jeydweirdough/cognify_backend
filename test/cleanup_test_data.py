@@ -20,7 +20,6 @@ async def cleanup_test_data():
     """
     print("🔄 Starting test data cleanup...")
 
-    # --- FIX: Added all collections that store test or generated data ---
     collections = [
         "user_profiles",
         "subjects",
@@ -33,9 +32,8 @@ async def cleanup_test_data():
         "generated_summaries",
         "generated_quizzes",
         "generated_flashcards",
-        "student_analytics_reports" # This collection is used in routes/utilities.py
+        "student_motivations"
     ]
-    # --- END FIX ---
 
     total_deleted = 0
 

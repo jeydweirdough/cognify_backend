@@ -2,9 +2,12 @@ from fastapi import Request, Depends, HTTPException, status
 from firebase_admin import auth
 from core.firebase import db
 import asyncio
+# --- 1. Import the new utility function ---
+from utils.status_utils import update_user_status 
 
 async def get_user_role(uid: str) -> str:
     """Fetch the user's role (designation) from Firestore."""
+    # ... (this function is unchanged)
     def _fetch_role():
         user_doc = db.collection("user_profiles").document(uid).get()
         if not user_doc.exists:
@@ -24,6 +27,7 @@ async def get_user_role(uid: str) -> str:
 
 
 def verify_firebase_token(request: Request):
+    # ... (this function is unchanged)
     auth_header = request.headers.get("authorization")
     if not auth_header:
         raise HTTPException(status_code=401, detail="Missing authorization header")
@@ -48,6 +52,12 @@ def allowed_users(roles: list[str]):
     ):
         uid = decoded["uid"]
 
+        # --- 2. ADDED PASSIVE HEARTBEAT ---
+        # Any valid API call updates 'last_seen' and sets status to 'online'.
+        # This runs in the background and doesn't slow down the request.
+        asyncio.create_task(update_user_status(uid, "online"))
+        # --- END OF ADDITION ---
+
         # Get user role
         role = await get_user_role(uid)
         decoded["role"] = role
@@ -55,7 +65,8 @@ def allowed_users(roles: list[str]):
         # Admin bypass
         if role == "admin":
             return decoded
-
+        
+        # ... (rest of the function is unchanged) ...
         # Role check
         if role not in roles:
             raise HTTPException(

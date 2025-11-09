@@ -38,18 +38,18 @@ class UserProfileUpdate(BaseModel):
 # It is now part of the generic service
 
 def build_login_like_response(uid: str, email: Optional[str], token: str, refresh_token: str, profile: Dict[str, Any], message: str):
-    # ... (this function is unchanged)
+    
     data = {"email": email, "uid": uid, "profile": profile, "message": message}
     if token and refresh_token: data.update({"token": token, "refresh_token": refresh_token})
     return data
 def _get_auth_email(uid: str) -> Optional[str]:
-    # ... (this function is unchanged)
+    
     try: return firebase_auth.get_user(uid).email
     except Exception: return None
 
 @router.get("/all")
 async def get_all_profiles(
-    # ... (this function is unchanged)
+    
     request: Request, 
     decoded=Depends(allowed_users(["admin", "faculty_member"])),
     limit: int = 20,
@@ -98,7 +98,7 @@ async def get_all_profiles(
 
 @router.get("/", status_code=200, response_model=UserProfileModel) 
 async def get_personal_profile(
-    # ... (this function is unchanged)
+    
     request: Request, 
     decoded=Depends(allowed_users(["student", "faculty_member", "admin"]))
 ):
@@ -110,7 +110,7 @@ async def get_personal_profile(
 
 @router.post("/", status_code=201, response_model=UserProfileModel)
 async def admin_create_user_and_profile(
-    # ... (this function is unchanged)
+    
     user_data: AdminCreateUserSchema,
     decoded=Depends(allowed_users(["admin"]))
 ):
@@ -138,7 +138,7 @@ async def admin_create_user_and_profile(
 
 @router.get("/{user_id}", response_model=UserProfileModel)
 async def get_profile(
-    # ... (this function is unchanged)
+    
     user_id: str, 
     decoded=Depends(allowed_users(["admin", "faculty_member"]))
 ):
@@ -149,7 +149,7 @@ async def get_profile(
 
 @router.put("/{user_id}", response_model=UserProfileModel)
 async def update_profile(
-    # ... (this function is unchanged)
+    
     user_id: str,
     update_data: UserProfileUpdate,
     decoded=Depends(allowed_users(["admin", "student", "faculty_member"]))
@@ -201,7 +201,7 @@ class DeviceTokenPayload(BaseModel):
 
 @router.post("/register_device", status_code=status.HTTP_200_OK)
 async def register_device_token(
-    # ... (this function is unchanged)
+    
     payload: DeviceTokenPayload,
     decoded=Depends(allowed_users(["student"]))
 ):
@@ -227,17 +227,18 @@ async def purge_user_and_data(
 ):
     """
     [Admin] PERMANENTLY deletes a user and all their associated data
-    from the system. This is irreversible and fixes the "clogged" data.
+    from the system. This is irreversible.
     
     This deletes:
     1. The Firebase Auth account.
     2. The Firestore user_profiles document.
     3. All related 'activities'.
     4. All related 'recommendations'.
-    5. All related 'student_analytics_reports'.
+    5. All related 'student_motivations'.
     """
     
     # 1. Delete from Firebase Authentication (The login account)
+    # ... (this part is unchanged) ...
     try:
         await asyncio.to_thread(firebase_auth.delete_user, user_id)
         print(f"Successfully deleted auth user: {user_id}")
@@ -247,10 +248,9 @@ async def purge_user_and_data(
         raise HTTPException(status_code=500, detail=f"Failed to delete auth user: {e}")
 
     # 2. Delete the main Firestore Profile document
-    # We use the new 'delete_permanent' function
     await profile_service.delete_permanent(user_id)
     
-    # 3. Run the cascading deletes using the new GENERIC 'purge_where'
+    # 3. Run the cascading deletes using 'purge_where'
     deleted_activities = await activity_service.purge_where(
         field="user_id", operator="==", value=user_id
     )
@@ -259,16 +259,17 @@ async def purge_user_and_data(
         field="user_id", operator="==", value=user_id
     )
     
-    # 4. For collections without a service, we can create one on-the-fly
-    # (The model doesn't matter since we're just deleting)
-    analytics_service_temp = FirestoreModelService(
-        collection_name="student_analytics_reports",
+    # --- 4. THIS IS THE FIX ---
+    # Delete the user's document from the 'student_motivations' collection
+    # (The user_id is the document ID in this collection)
+    motivation_service_temp = FirestoreModelService(
+        collection_name="student_motivations", # <-- Corrected collection
         model=BaseModel 
     )
-    deleted_reports = await analytics_service_temp.purge_where(
-        field="student_id", operator="==", value=user_id
-    )
-    
+    motivation_doc_deleted = await motivation_service_temp.delete_permanent(user_id)
+    deleted_motivations = 1 if motivation_doc_deleted else 0
+    # --- END FIX ---
+
     return {
         "message": f"User {user_id} and all related data have been purged.",
         "auth_user_deleted": True,
@@ -276,6 +277,6 @@ async def purge_user_and_data(
         "related_data_purged": {
             "activities": deleted_activities,
             "recommendations": deleted_recs,
-            "analytics_reports": deleted_reports
+            "student_motivations": deleted_motivations # <-- Corrected key
         }
     }
