@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi import UploadFile, File
 from typing import List, Dict, Optional
+# --- NEW: Import PaginatedResponse ---
 from database.models import Module, ModuleBase, PaginatedResponse
 from services import module_service
 from core.security import allowed_users
@@ -51,6 +52,23 @@ async def create_module(payload: ModuleBase):
         return await module_service.create(payload)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+# --- NEW: Endpoint to get modules for a specific subject ---
+@router.get("/by_subject/{subject_id}", response_model=PaginatedResponse[Module])
+async def list_modules_for_subject(
+    subject_id: str,
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"])),
+    limit: int = 50,
+    start_after: Optional[str] = None
+):
+    """[All] Lists all non-deleted modules for a specific subject."""
+    items, last_id = await module_service.where(
+        "subject_id", "==", subject_id, 
+        limit=limit, 
+        start_after=start_after
+    )
+    return PaginatedResponse(items=items, last_doc_id=last_id)
+# --- END NEW ENDPOINT ---
 
 @router.get("/", response_model=PaginatedResponse[Module])
 async def list_modules(

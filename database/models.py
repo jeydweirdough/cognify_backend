@@ -158,18 +158,8 @@ class Quiz(QuizBase, TimestampModel):
     id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
 
-class RecommendationBase(BaseModel):
-    user_id: str
-    subject_id: Optional[str] = None
-    recommended_topic: Optional[str] = None
-    recommended_module: Optional[str] = None
-    bloom_focus: Optional[str] = None
-    reason: Optional[str] = None
-    confidence: Optional[float] = None
-    timestamp: Optional[str] = None
-class Recommendation(RecommendationBase, TimestampModel):
-    id: str
-    def to_dict(self): return self.model_dump(exclude_none=True)
+
+# --- (Old Recommendation model removed) ---
 
 
 # --- AI-Generated Content Models ---
@@ -371,10 +361,10 @@ class ContentVerification(ContentVerificationBase, TimestampModel):
 
 
 # ============================================================
-# ENHANCED RECOMMENDATION MODEL
+# RECOMMENDATION MODEL (Replaced Enhanced)
 # ============================================================
 
-class EnhancedRecommendationBase(BaseModel):
+class RecommendationBase(BaseModel):
     """Updated recommendation model that considers diagnostic results"""
     user_id: str
     subject_id: str
@@ -388,7 +378,7 @@ class EnhancedRecommendationBase(BaseModel):
     confidence: float
     timestamp: Optional[str] = None
 
-class EnhancedRecommendation(EnhancedRecommendationBase, TimestampModel):
+class Recommendation(RecommendationBase, TimestampModel):
     id: str
     def to_dict(self): 
         return self.model_dump(exclude_none=True)

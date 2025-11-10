@@ -27,6 +27,7 @@ class Settings:
         "http://localhost:8000",  # API docs
         "http://localhost:8081",  # Mobile dev
         "http://localhost:19006", # Expo dev
+        "http://0.0.0.0:8000",
         "https://cognify-backend.vercel.app",
         "https://cognify-admins.vercel.app",
         "https://cognify.vercel.app",

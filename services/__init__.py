@@ -2,7 +2,7 @@ from .generic_service import FirestoreModelService
 from database.models import (
     Activity, Module, Quiz, Recommendation, Assessment, TOS, UserProfileModel,
     GeneratedSummary, GeneratedQuiz, GeneratedFlashcards,
-    DiagnosticAssessment, DiagnosticResult, EnhancedRecommendation,
+    DiagnosticAssessment, DiagnosticResult,
     ContentVerification, StudySession
 )
 
@@ -22,10 +22,12 @@ quiz_service = FirestoreModelService(
     model=Quiz
 )
 
+# --- FIX: Point the main recommendation_service to the new model ---
 recommendation_service = FirestoreModelService(
     collection_name="recommendations", 
     model=Recommendation
 )
+# --- END FIX ---
 
 assessment_service = FirestoreModelService(
     collection_name="assessments", 
@@ -69,10 +71,8 @@ diagnostic_result_service = FirestoreModelService(
     model=DiagnosticResult
 )
 
-enhanced_recommendation_service = FirestoreModelService(
-    collection_name="enhanced_recommendations",
-    model=EnhancedRecommendation
-)
+# --- FIX: Removed the enhanced_recommendation_service ---
+# (The main service above now handles this)
 
 # Content verification service
 content_verification_service = FirestoreModelService(

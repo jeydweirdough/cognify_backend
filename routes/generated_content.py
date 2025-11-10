@@ -254,3 +254,27 @@ async def get_generated_flashcards_for_module(
         start_after=start_after
     )
     return PaginatedResponse(items=items, last_doc_id=last_id)
+
+# --- NEW: Endpoint to get a single generated quiz by ID ---
+@router.get("/generated_quizzes/{id}", response_model=GeneratedQuiz)
+async def get_generated_quiz(
+    id: str, 
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
+):
+    """[All] Gets a single generated quiz by its document ID."""
+    quiz = await generated_quiz_service.get(id)
+    if not quiz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Generated quiz not found")
+    return quiz
+
+# --- NEW: Endpoint to get single generated flashcards by ID ---
+@router.get("/generated_flashcards/{id}", response_model=GeneratedFlashcards)
+async def get_generated_flashcards(
+    id: str, 
+    decoded=Depends(allowed_users(["admin", "faculty_member", "student"]))
+):
+    """[All] Gets a single generated flashcard deck by its document ID."""
+    flashcards = await generated_flashcards_service.get(id)
+    if not flashcards:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Generated flashcards not found")
+    return flashcards

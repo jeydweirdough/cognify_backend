@@ -1,5 +1,5 @@
 # routes/diagnostics.py
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
 from typing import List, Optional
 from database.models import (
     DiagnosticAssessment, DiagnosticAssessmentBase,
@@ -9,12 +9,14 @@ from database.models import (
 from services import diagnostic_service, diagnostic_result_service
 from core.security import allowed_users
 
+# --- NEW: Import the enhanced recommender service ---
+from services.recommender import generate_recommendations_from_diagnostic
+
 router = APIRouter(prefix="/diagnostics", tags=["Diagnostic Assessments"])
 
 # ============================================================
 # DIAGNOSTIC ASSESSMENT ENDPOINTS (Faculty/Admin)
 # ============================================================
-
 @router.post("/assessments", response_model=DiagnosticAssessment, status_code=status.HTTP_201_CREATED)
 async def create_diagnostic_assessment(
     payload: DiagnosticAssessmentBase,
@@ -68,6 +70,8 @@ async def get_diagnostic_assessment(
 @router.post("/results", response_model=DiagnosticResult, status_code=status.HTTP_201_CREATED)
 async def submit_diagnostic_result(
     payload: DiagnosticResultBase,
+    # --- NEW: Add BackgroundTasks ---
+    background_tasks: BackgroundTasks,
     decoded=Depends(allowed_users(["student"]))
 ):
     """
@@ -83,8 +87,10 @@ async def submit_diagnostic_result(
     try:
         result = await diagnostic_result_service.create(payload)
         
-        # TODO: Trigger recommendation generation in background
-        # asyncio.create_task(generate_recommendations_from_diagnostic(result.id))
+        # --- FIX: Trigger recommendation generation in background ---
+        print(f"Queueing recommendation task for result: {result.id}")
+        background_tasks.add_task(generate_recommendations_from_diagnostic, result.id)
+        # --- END FIX ---
         
         return result
     except Exception as e:
