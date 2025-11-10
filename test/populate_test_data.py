@@ -1,269 +1,467 @@
-"""Test data population script for Cognify Backend."""
+"""
+REALISTIC test data population for Cognify Backend.
+Based on the manuscript requirements with authentic learning patterns.
+"""
+
 import asyncio
 from datetime import datetime, timedelta, timezone
-import uuid
-import sys
-import os
-from pathlib import Path
 import random
+import sys
+from pathlib import Path
+from collections import defaultdict
 
-# --- Add base directory to path ---
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(BASE_DIR))
-# ----------------------------------
 
 from core.firebase import db
-from .config import *
-
-# --- IMPORT FIREBASE ADMIN AUTH ---
-from firebase_admin import auth
-
-# This imports the actual models from your app to ensure data is correct
-from database.models import (
-    UserProfileBase, StudentProgress, Subject, TOS, BloomEntry, 
-    SubContent, ContentSection
-)
+from database.models import get_current_iso_time
 from services.role_service import get_role_id_by_designation
+from firebase_admin import auth
+from .config import (
+    TEST_PREFIX, SUBJECTS_DATA, STUDENT_PERSONAS, PERSONA_BASE_SCORES
+)
 
 def get_iso_time():
     return datetime.now(timezone.utc).isoformat()
 
-async def create_content():
-    """Creates all test modules and quizzes from config."""
-    print(f"Creating {len(TEST_MODULES_DATA)} test modules...")
-    for mod_data in TEST_MODULES_DATA:
-        module_ref = db.collection("modules").document(mod_data["id"])
-        module_ref.set({
-            "id": mod_data["id"],
-            "subject_id": TEST_SUBJECT_ID,
-            "title": mod_data["title"],
-            "bloom_level": mod_data["bloom_level"],
-            "purpose": f"Purpose for {mod_data['title']}",
+
+def create_tos_for_subject(subject_id: str, subject_name: str):
+    """Creates a realistic TOS document"""
+    return {
+        "id": f"{TEST_PREFIX}tos_{subject_id.split('_')[-1]}_v1",
+        "subject_id": subject_id,
+        "subject_name": subject_name,
+        "pqf_level": 7,
+        "difficulty_distribution": {"easy": 0.30, "moderate": 0.40, "difficult": 0.30},
+        "content": [
+            {
+                "title": "Fundamental Concepts",
+                "sub_content": [
+                    {"purpose": "Define key terms and concepts", "blooms_taxonomy": [{"remembering": 10}]},
+                    {"purpose": "Explain theoretical foundations", "blooms_taxonomy": [{"understanding": 10}]}
+                ],
+                "no_items": 20,
+                "weight_total": 0.20
+            },
+            {
+                "title": "Application and Analysis",
+                "sub_content": [
+                    {"purpose": "Apply concepts to case studies", "blooms_taxonomy": [{"applying": 15}]},
+                    {"purpose": "Analyze psychological phenomena", "blooms_taxonomy": [{"analyzing": 15}]}
+                ],
+                "no_items": 30,
+                "weight_total": 0.30
+            },
+            {
+                "title": "Evaluation and Integration",
+                "sub_content": [
+                    {"purpose": "Evaluate methods and approaches", "blooms_taxonomy": [{"evaluating": 20}]},
+                    {"purpose": "Synthesize multiple perspectives", "blooms_taxonomy": [{"creating": 10}]}
+                ],
+                "no_items": 30,
+                "weight_total": 0.30
+            },
+            {
+                "title": "Professional Practice",
+                "sub_content": [
+                    {"purpose": "Apply ethical guidelines", "blooms_taxonomy": [{"applying": 10}]},
+                    {"purpose": "Evaluate professional scenarios", "blooms_taxonomy": [{"evaluating": 10}]}
+                ],
+                "no_items": 20,
+                "weight_total": 0.20
+            }
+        ],
+        "total_items": 100,
+        "is_active": True,
+        "created_at": get_iso_time(),
+        "deleted": False
+    }
+
+
+def generate_diagnostic_assessment(subject_id: str, subject_name: str, tos_data: dict):
+    """Creates a realistic diagnostic assessment"""
+    questions = []
+    q_num = 1
+    
+    for section in tos_data["content"]:
+        topic_title = section["title"]
+        
+        for sub in section.get("sub_content", []):
+            for bloom_entry in sub.get("blooms_taxonomy", []):
+                bloom_level = list(bloom_entry.keys())[0]
+                count = bloom_entry[bloom_level]
+                
+                for i in range(min(3, count)):
+                    questions.append({
+                        "question_id": f"q{q_num}",
+                        "tos_topic_title": topic_title,
+                        "bloom_level": bloom_level,
+                        "question": f"Sample {bloom_level} question for {topic_title} in {subject_name}",
+                        "options": ["Option A", "Option B", "Option C", "Option D"],
+                        "answer": "Option A",
+                        "cognitive_weight": 1.0
+                    })
+                    q_num += 1
+    
+    return {
+        "id": f"{TEST_PREFIX}diag_{subject_id.split('_')[-1]}",
+        "subject_id": subject_id,
+        "title": f"Diagnostic Assessment: {subject_name}",
+        "instructions": (
+            "This diagnostic test will help identify your strengths and areas for improvement. "
+            "Answer all questions to the best of your ability."
+        ),
+        "total_items": len(questions),
+        "questions": questions,
+        "passing_score": 75.0,
+        "time_limit_minutes": 60,
+        "created_at": get_iso_time(),
+        "deleted": False
+    }
+
+
+def generate_realistic_score(persona: str, bloom_level: str, variation: float = 5.0) -> float:
+    """
+    Generates realistic scores based on student persona and cognitive level.
+    Adds natural variation (+/- variation).
+    """
+    base_scores = PERSONA_BASE_SCORES.get(persona, {})
+    base_score = base_scores.get(bloom_level, 70)
+    
+    var = random.uniform(-variation, variation)
+    final_score = max(0, min(100, base_score + var))
+    
+    return round(final_score, 1)
+
+
+def create_modules_for_subject(subject_id: str, subject_name: str):
+    """Create sample modules for a subject"""
+    bloom_levels = ["remembering", "understanding", "applying", "analyzing", "evaluating", "creating"]
+    modules = []
+    
+    for i, bloom in enumerate(bloom_levels, 1):
+        module_id = f"{TEST_PREFIX}mod_{subject_id.split('_')[-1]}_{bloom[:3]}_{i}"
+        modules.append({
+            "id": module_id,
+            "subject_id": subject_id,
+            "title": f"{subject_name}: {bloom.capitalize()} Module {i}",
+            "purpose": f"Master {bloom} level concepts",
+            "bloom_level": bloom,
             "material_type": "reading",
-            "material_url": "https://example.com/test/module",
-            "estimated_time": 30,
+            "material_url": "https://example.com/module.pdf",
+            "estimated_time": random.randint(30, 60),
             "created_at": get_iso_time(),
             "deleted": False
         })
-
-    print(f"Creating {len(TEST_QUIZZES_DATA)} test quizzes...")
-    for quiz_data in TEST_QUIZZES_DATA:
-        quiz_ref = db.collection("quizzes").document(quiz_data["id"])
-        quiz_ref.set({
-            "id": quiz_data["id"],
-            "subject_id": TEST_SUBJECT_ID,
-            "topic_title": quiz_data["title"],
-            "bloom_level": quiz_data["bloom_level"],
-            "question": f"Test Question for {quiz_data['title']}",
-            "options": ["Option A", "Option B", "Option C", "Option D"],
-            "answer": "Option A",
-            "created_at": get_iso_time(),
-            "deleted": False
-        })
-
-def generate_realistic_scores(persona: str, bloom_level: str) -> (float, float, int):
-    """
-    Generates a realistic score, completion, and duration
-    based on the student's persona and the content's bloom level.
-    """
-    score = 75.0
-    completion = random.uniform(0.9, 1.0)
-    duration = random.randint(1200, 3600) # 20-60 minutes
-
-    # Simple bloom levels
-    if bloom_level in ["remembering", "understanding"]:
-        if persona == "high_achiever":
-            score = random.randint(85, 100)
-        elif persona == "struggler":
-            score = random.randint(40, 65)
-        elif persona == "poor_application": # Good at remembering!
-            score = random.randint(90, 100)
-        elif persona == "good_crammer": # Bad at remembering!
-            score = random.randint(50, 70)
-
-    # Complex bloom levels
-    elif bloom_level in ["applying", "analyzing"]:
-        if persona == "high_achiever":
-            score = random.randint(85, 100)
-        elif persona == "struggler":
-            score = random.randint(40, 60)
-        elif persona == "poor_application": # Bad at applying!
-            score = random.randint(40, 60)
-        elif persona == "good_crammer": # Good at applying!
-            score = random.randint(85, 100)
-
-    return score, round(completion, 2), duration
+    
+    return modules
 
 
-async def create_student_activities(student_id: str, persona: str) -> int:
-    """
-    Generates a full, realistic activity log for a single student.
-    They will complete every module and quiz.
-    """
+def create_activities_for_student(student_id: str, persona: str, subject_id: str, modules: list, num_activities: int = 15):
+    """Create realistic activities for a student"""
+    activities = []
     now = datetime.now(timezone.utc)
-    activity_count = 0
     
-    # Combine all content
-    all_content = [
-        {"type": "module", "ref_id": mod["id"], "bloom_level": mod["bloom_level"]} for mod in TEST_MODULES_DATA
-    ] + [
-        {"type": "quiz", "ref_id": quiz["id"], "bloom_level": quiz["bloom_level"]} for quiz in TEST_QUIZZES_DATA
-    ]
-    
-    # Create an activity for every piece of content
-    for i, content in enumerate(all_content):
-        score, completion, duration = generate_realistic_scores(persona, content["bloom_level"])
+    for i in range(num_activities):
+        module = random.choice(modules)
+        bloom_level = module["bloom_level"]
+        score = generate_realistic_score(persona, bloom_level)
         
-        activity_id = f"{TEST_PREFIX}act_{student_id[len(TEST_PREFIX):]}_{content['ref_id'][len(TEST_PREFIX):]}"
-        act_ref = db.collection("activities").document(activity_id)
+        activity_id = f"{TEST_PREFIX}act_{student_id.split('_')[-1]}_{subject_id.split('_')[-1]}_{i+1}"
+        timestamp = (now - timedelta(days=num_activities - i, hours=random.randint(0, 23))).isoformat()
         
-        # Stagger timestamps
-        timestamp = (now - timedelta(days=len(all_content) - i)).isoformat()
-        
-        act_ref.set({
+        activities.append({
             "id": activity_id,
             "user_id": student_id,
-            "subject_id": TEST_SUBJECT_ID,
-            "activity_type": content["type"],
-            "activity_ref": content["ref_id"],
-            "bloom_level": content["bloom_level"],
+            "subject_id": subject_id,
+            "activity_type": random.choice(["module", "quiz", "practice"]),
+            "activity_ref": module["id"],
+            "bloom_level": bloom_level,
             "score": score,
-            "completion_rate": completion,
-            "duration": duration,
+            "completion_rate": random.uniform(0.85, 1.0) if score > 50 else random.uniform(0.5, 0.85),
+            "duration": random.randint(1200, 3600),
             "timestamp": timestamp,
             "created_at": timestamp,
             "deleted": False
         })
-        activity_count += 1
-        
-    return activity_count
+    
+    return activities
 
 
 async def populate_test_data():
-    """Populate Firestore with test data that matches the application schema."""
-    print("🔄 Populating test data...")
+    """Populate Firestore with realistic test data"""
+    print("🚀 Starting REALISTIC test data population...")
+    print("=" * 60)
     
-    print("ℹ️  Fetching real 'student' role ID from 'roles' collection...")
-    real_student_role_id = await get_role_id_by_designation("student")
-    
-    if not real_student_role_id:
-        print("❌ CRITICAL ERROR: Could not find the 'student' role in your 'roles' collection.")
-        print("Please ensure a role with designation 'student' exists in Firestore.")
+    student_role_id = await get_role_id_by_designation("student")
+    if not student_role_id:
+        print("❌ CRITICAL: 'student' role not found!")
         return
     
-    print(f"✅ Found 'student' role. Using ID: {real_student_role_id}")
-
-    # 1. Create test Subject and TOS
-    subject_ref = db.collection("subjects").document(TEST_SUBJECT_ID)
-    subject_data = Subject(subject_id=TEST_SUBJECT_ID, **SAMPLE_SUBJECT_DATA).model_dump(exclude_none=True)
+    print(f"✅ Found 'student' role. Using ID: {student_role_id}\n")
     
-    # --- FIX: Add the 'id' field for the cleanup script to find ---
-    subject_ref.set({**subject_data, "id": TEST_SUBJECT_ID, "deleted": False})
-    print(f"✅ Created test subject: {TEST_SUBJECT_ID}")
-
-    tos_ref = db.collection("tos").document(TEST_TOS_ID)
-    tos_data = TOS(id=TEST_TOS_ID, **SAMPLE_TOS_DATA).to_dict()
+    # 1. CREATE SUBJECTS, TOS, AND DIAGNOSTICS
+    print(f"📚 Creating {len(SUBJECTS_DATA)} Psychology subjects with TOS...")
+    all_modules = {}
     
-    # --- FIX: Add the 'id' field for the cleanup script to find ---
-    tos_ref.set({
-        **tos_data,
-        "id": TEST_TOS_ID, 
-        "created_at": get_iso_time(),
-        "deleted": False
-    })
-    print(f"✅ Created test TOS: {TEST_TOS_ID}")
-
-    # 2. Create all test content (Modules, Quizzes)
-    await create_content()
-    print(f"✅ Created {len(TEST_MODULES_DATA)} modules and {len(TEST_QUIZZES_DATA)} quizzes.")
-
-    # 3. Create all 12 test students and their 144 activities
-    all_students_to_create = [
-        {"id": TEST_PASS_STUDENT_ID, "data": SAMPLE_PASS_STUDENT_DATA, "persona": "high_achiever"},
-        {"id": TEST_FAIL_STUDENT_ID, "data": SAMPLE_FAIL_STUDENT_DATA, "persona": "struggler"},
-    ]
-    all_students_to_create.extend(ADDITIONAL_STUDENT_DATA)
+    for subj_data in SUBJECTS_DATA:
+        subject_id = subj_data["id"]
+        
+        # Create TOS
+        tos_data = create_tos_for_subject(subject_id, subj_data["name"])
+        tos_ref = db.collection("tos").document(tos_data["id"])
+        tos_ref.set(tos_data)
+        
+        # Create Subject
+        subj_ref = db.collection("subjects").document(subject_id)
+        subj_ref.set({
+            "id": subject_id,
+            "subject_id": subject_id,
+            "subject_name": subj_data["name"],
+            "pqf_level": subj_data["pqf_level"],
+            "active_tos_id": tos_data["id"],
+            "deleted": False
+        })
+        
+        # Create Diagnostic Assessment
+        diag_data = generate_diagnostic_assessment(subject_id, subj_data["name"], tos_data)
+        diag_ref = db.collection("diagnostic_assessments").document(diag_data["id"])
+        diag_ref.set(diag_data)
+        
+        # Create Modules
+        modules = create_modules_for_subject(subject_id, subj_data["name"])
+        for module in modules:
+            db.collection("modules").document(module["id"]).set(module)
+        
+        all_modules[subject_id] = modules
+        
+        print(f"  ✅ {subj_data['name']}")
+        print(f"     - TOS: {tos_data['id']}")
+        print(f"     - Diagnostic: {diag_data['id']} ({diag_data['total_items']} questions)")
+        print(f"     - Modules: {len(modules)}")
     
-    total_activities_created = 0
-    print(f"Creating {len(all_students_to_create)} test students and their activity logs...")
-
-    for student in all_students_to_create:
-        student_id = student["id"]
-        student_data_dict = {**student["data"], "role_id": real_student_role_id}
-        email = student_data_dict["email"]
-        # Use email as password for test simplicity
-        password = email 
-
-        # --- FIX: 3a. Create the Firebase Auth user first ---
+    # 2. CREATE STUDENTS
+    print(f"\n👥 Creating {len(STUDENT_PERSONAS)} realistic students...")
+    for i, student in enumerate(STUDENT_PERSONAS):
+        student_id = f"{TEST_PREFIX}student_{i+1:02d}"
+        email = student["email"]
+        password = "demo123"  # Default password for all demo students
+        
+        # Create Firebase Auth user
         try:
-            auth.create_user(
-                uid=student_id,
-                email=email,
-                password=password
-            )
-            print(f"✅ Created auth user: {email} (UID: {student_id})")
-        except auth.UserAlreadyExistsError:
-            print(f"ℹ️  Auth user {email} (UID: {student_id}) already exists, skipping creation.")
+            auth.create_user(uid=student_id, email=email, password=password)
+            print(f"  ✅ Created auth user: {email} (UID: {student_id})")
+        except auth.EmailAlreadyExistsError:
+            print(f"  ℹ️  Auth user {email} already exists, skipping.")
         except Exception as e:
-            print(f"❌ FAILED to create auth user {email}: {e}. Skipping this student.")
-            continue # Skip to the next student
+            print(f"  ❌ Failed to create auth user {email}: {e}")
+            continue
         
-        # --- 3b. Create the user profile in Firestore ---
-        student_ref = db.collection("user_profiles").document(student_id)
-        
-        # Create a default progress map if it doesn't exist
-        if "progress" not in student_data_dict:
-             student_data_dict["progress"] = {"Theories": 0.0, "Globalization": 0.0}
-        
-        student_data = UserProfileBase(**student_data_dict).model_dump(exclude_none=True)
-        student_ref.set({
-            **student_data,
+        # Create Firestore profile
+        db.collection("user_profiles").document(student_id).set({
             "id": student_id,
+            "email": email,
+            "first_name": student["name"].split()[0],
+            "last_name": student["name"].split()[1],
+            "role_id": student_role_id,
+            "pre_assessment_score": None,
+            "progress": {},
             "created_at": get_iso_time(),
             "deleted": False
         })
         
-        # --- 3c. Create all activities for this student ---
-        num_activities = await create_student_activities(student_id, student["persona"])
-        total_activities_created += num_activities
+        print(f"  ✅ {student['name']} ({student['persona']})")
     
-    print(f"✅ Created {len(all_students_to_create)} total students.")
-    print(f"✅ Created {total_activities_created} total activities.")
-
-    # 4. Create test recommendations (for one of the failing students)
-    for i, rec_id in enumerate(TEST_RECOMMENDATION_IDS):
-        rec_ref = db.collection("recommendations").document(rec_id)
-        rec_ref.set({
-            "id": rec_id, "deleted": False,
-            "user_id": TEST_FAIL_STUDENT_ID, # Give recs to the original fail student
-            "subject_id": TEST_SUBJECT_ID,
-            "recommended_topic": "Applying Trait Theory",
-            "recommended_module": TEST_MODULES_DATA[4]["id"], # Points to "mod_app_01"
-            "bloom_focus": "applying",
-            "reason": "Test recommendation: Low scores in 'applying' activities.",
-            "confidence": 0.85,
-            "timestamp": get_iso_time(), "created_at": get_iso_time()
-        })
-    print(f"✅ Created {len(TEST_RECOMMENDATION_IDS)} test recommendations for {TEST_FAIL_STUDENT_ID}")
-
-    print("\n🎉 Test data population complete!")
-    print("\nTest IDs for reference:")
-    print(f"Original Pass Student ID: {TEST_PASS_STUDENT_ID} (Persona: high_achiever)")
-    print(f"Original Fail Student ID: {TEST_FAIL_STUDENT_ID} (Persona: struggler)")
-    print(f"View the 10 other students (e.g., {ADDITIONAL_STUDENT_DATA[0]['id']}) in Firestore.")
+    # 3. GENERATE DIAGNOSTIC RESULTS AND ACTIVITIES
+    print("\n🧪 Generating diagnostic results and activities...")
+    total_activities = 0
+    
+    for i, student in enumerate(STUDENT_PERSONAS):
+        student_id = f"{TEST_PREFIX}student_{i+1:02d}"
+        persona = student["persona"]
+        
+        # Take diagnostic for first 2 subjects
+        for subj_data in SUBJECTS_DATA[:2]:
+            subject_id = subj_data["id"]
+            diag_id = f"{TEST_PREFIX}diag_{subject_id.split('_')[-1]}"
+            
+            # Fetch diagnostic
+            diag_doc = db.collection("diagnostic_assessments").document(diag_id).get()
+            if not diag_doc.exists:
+                continue
+            
+            diag = diag_doc.to_dict()
+            
+            # Calculate TOS performance
+            tos_performance = []
+            all_scores = []
+            
+            topic_questions = defaultdict(lambda: {"questions": [], "bloom_breakdown": defaultdict(list)})
+            
+            for q in diag["questions"]:
+                topic_questions[q["tos_topic_title"]]["questions"].append(q)
+            
+            for topic_title, data in topic_questions.items():
+                topic_correct = 0
+                topic_total = len(data["questions"])
+                
+                for q in data["questions"]:
+                    bloom = q["bloom_level"]
+                    score = generate_realistic_score(persona, bloom)
+                    
+                    if score > 60:
+                        topic_correct += 1
+                    
+                    data["bloom_breakdown"][bloom].append(score)
+                
+                topic_score = (topic_correct / topic_total) * 100
+                all_scores.append(topic_score)
+                
+                bloom_breakdown = {}
+                for bloom, scores in data["bloom_breakdown"].items():
+                    bloom_breakdown[bloom] = round(sum(scores) / len(scores), 1)
+                
+                tos_performance.append({
+                    "topic_title": topic_title,
+                    "total_questions": topic_total,
+                    "correct_answers": topic_correct,
+                    "score_percentage": round(topic_score, 1),
+                    "bloom_breakdown": bloom_breakdown
+                })
+            
+            overall_score = round(sum(all_scores) / len(all_scores), 1)
+            passing_status = "passed" if overall_score >= 75.0 else "failed"
+            
+            # Save diagnostic result
+            result_id = f"{TEST_PREFIX}result_{student_id.split('_')[-1]}_{subject_id.split('_')[-1]}"
+            db.collection("diagnostic_results").document(result_id).set({
+                "id": result_id,
+                "user_id": student_id,
+                "assessment_id": diag_id,
+                "subject_id": subject_id,
+                "overall_score": overall_score,
+                "passing_status": passing_status,
+                "time_taken_seconds": random.randint(2400, 3600),
+                "tos_performance": tos_performance,
+                "timestamp": get_iso_time(),
+                "created_at": get_iso_time(),
+                "deleted": False
+            })
+            
+            # Create activities for this subject
+            modules = all_modules[subject_id]
+            activities = create_activities_for_student(student_id, persona, subject_id, modules, num_activities=15)
+            
+            for activity in activities:
+                db.collection("activities").document(activity["id"]).set(activity)
+            
+            total_activities += len(activities)
+            
+            print(f"  ✅ {student['name']}: {subj_data['name']} - {overall_score}% ({passing_status}), {len(activities)} activities")
+    
+    print("\n" + "=" * 60)
+    print("🎉 REALISTIC DATA POPULATION COMPLETE!")
+    print("\n📊 Summary:")
+    print(f"  - {len(SUBJECTS_DATA)} Subjects")
+    print(f"  - {len(SUBJECTS_DATA)} TOS Documents")
+    print(f"  - {len(SUBJECTS_DATA)} Diagnostic Assessments")
+    print(f"  - {sum(len(mods) for mods in all_modules.values())} Modules")
+    print(f"  - {len(STUDENT_PERSONAS)} Students")
+    print(f"  - {len(STUDENT_PERSONAS) * 2} Diagnostic Results")
+    print(f"  - {total_activities} Activities")
+    print("\n✨ Ready for demo!")
+    print("\nDefault password for all students: demo123")
 
 
 if __name__ == "__main__":
     if str(BASE_DIR) not in sys.path:
-         sys.path.insert(0, str(BASE_DIR))
+        sys.path.insert(0, str(BASE_DIR))
     
     from core.firebase import db
-    # --- ADD AUTH TO MAIN EXECUTION BLOCK ---
     from firebase_admin import auth
-    from database.models import (
-        UserProfileBase, StudentProgress, Subject, TOS, BloomEntry, 
-        SubContent, ContentSection
-    )
+    from database.models import get_current_iso_time
     from services.role_service import get_role_id_by_designation
-
+    
     asyncio.run(populate_test_data())
+
+
+# ============================================================
+# FILE: test/cleanup_test_data.py (FIX - Import TEST_PREFIX)
+# ============================================================
+"""Clean up test data from Firestore."""
+import asyncio
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+sys.path.append(str(BASE_DIR))
+
+from core.firebase import db
+from .config import TEST_PREFIX  # ✅ Import instead of redefining
+from google.cloud.firestore_v1.base_query import FieldFilter
+
+async def cleanup_test_data():
+    """Remove all test data from Firestore"""
+    print("🔄 Starting test data cleanup...")
+    print(f"Using TEST_PREFIX: {TEST_PREFIX}")
+
+    collections = [
+        "user_profiles",
+        "subjects",
+        "modules",
+        "activities",
+        "assessments",
+        "quizzes",
+        "recommendations",
+        "tos",
+        "generated_summaries",
+        "generated_quizzes",
+        "generated_flashcards",
+        "student_motivations",
+        "diagnostic_assessments",
+        "diagnostic_results",
+        "study_sessions",
+        "content_verifications",
+        "student_analytics_reports",
+    ]
+
+    total_deleted = 0
+
+    for collection_name in collections:
+        col_ref = db.collection(collection_name)
+        docs_to_delete = []
+        
+        try:
+            query = col_ref.where(filter=FieldFilter('id', '>=', TEST_PREFIX))\
+                           .where(filter=FieldFilter('id', '<', TEST_PREFIX + u'\uf8ff'))
+            
+            docs = query.stream()
+            for doc in docs:
+                if doc.id.startswith(TEST_PREFIX):
+                    docs_to_delete.append(doc.reference)
+        except Exception:
+            all_docs = col_ref.stream()
+            for doc in all_docs:
+                if doc.id.startswith(TEST_PREFIX):
+                    docs_to_delete.append(doc.reference)
+        
+        for doc_ref in docs_to_delete:
+            doc_ref.delete()
+
+        total_deleted += len(docs_to_delete)
+        if len(docs_to_delete) > 0:
+            print(f"✅ Deleted {len(docs_to_delete)} test document(s) from '{collection_name}'")
+        else:
+            print(f"ℹ️  No test data found in '{collection_name}'")
+
+    print(f"\n🧹 Cleanup complete! Removed {total_deleted} test documents")
+
+
+if __name__ == "__main__":
+    if str(BASE_DIR) not in sys.path:
+        sys.path.insert(0, str(BASE_DIR))
+         
+    from core.firebase import db
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    
+    asyncio.run(cleanup_test_data())

@@ -1,13 +1,12 @@
-# services/__init__.py
 from .generic_service import FirestoreModelService
 from database.models import (
     Activity, Module, Quiz, Recommendation, Assessment, TOS, UserProfileModel,
-    GeneratedSummary, GeneratedQuiz, GeneratedFlashcards,  # --- NEW ---
-    DiagnosticAssessment, DiagnosticResult, EnhancedRecommendation
+    GeneratedSummary, GeneratedQuiz, GeneratedFlashcards,
+    DiagnosticAssessment, DiagnosticResult, EnhancedRecommendation,
+    ContentVerification, StudySession
 )
 
-# --- Create one service instance for each model ---
-
+# Core content services
 activity_service = FirestoreModelService(
     collection_name="activities", 
     model=Activity
@@ -22,8 +21,6 @@ quiz_service = FirestoreModelService(
     collection_name="quizzes", 
     model=Quiz
 )
-
-# --- Standalone flashcard_service REMOVED ---
 
 recommendation_service = FirestoreModelService(
     collection_name="recommendations", 
@@ -45,8 +42,7 @@ profile_service = FirestoreModelService(
     model=UserProfileModel
 )
 
-# --- NEW: Services for AI-generated content ---
-
+# AI-generated content services
 generated_summary_service = FirestoreModelService(
     collection_name="generated_summaries",
     model=GeneratedSummary
@@ -62,6 +58,7 @@ generated_flashcards_service = FirestoreModelService(
     model=GeneratedFlashcards
 )
 
+# Diagnostic assessment services
 diagnostic_service = FirestoreModelService(
     collection_name="diagnostic_assessments",
     model=DiagnosticAssessment
@@ -75,4 +72,16 @@ diagnostic_result_service = FirestoreModelService(
 enhanced_recommendation_service = FirestoreModelService(
     collection_name="enhanced_recommendations",
     model=EnhancedRecommendation
+)
+
+# Content verification service
+content_verification_service = FirestoreModelService(
+    collection_name="content_verifications",
+    model=ContentVerification
+)
+
+# Study session service
+study_session_service = FirestoreModelService(
+    collection_name="study_sessions",
+    model=StudySession
 )
