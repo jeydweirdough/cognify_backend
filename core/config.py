@@ -13,9 +13,10 @@ class Settings:
     ENVIRONMENT = os.getenv("ENVIRONMENT")
 
     ALLOWED_ORIGINS = [
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://localhost:8000",
+        "http://localhost:5173", # for web
+        "http://localhost:3000", # for raw api
+        "http://localhost:8000", # for raw api
+        "http://localhost:8081", # for mobile
         "https://cognify-backend.vercel.app",
         "https://cognify-admins.vercel.app",
         "https://cognify.vercel.app",
