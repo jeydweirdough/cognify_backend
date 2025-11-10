@@ -10,9 +10,10 @@ sys.path.append(str(BASE_DIR))
 # ----------------------------------
 
 from core.firebase import db
-from .config import TEST_PREFIX
+# from .config import TEST_PREFIX
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+TEST_PREFIX = "demo_"
 
 async def cleanup_test_data():
     """Remove all test data from Firestore by iterating documents and
@@ -32,7 +33,9 @@ async def cleanup_test_data():
         "generated_summaries",
         "generated_quizzes",
         "generated_flashcards",
-        "student_motivations"
+        "student_motivations",
+        "diagnostic_assessments",
+        "diagnostic_results",
     ]
 
     total_deleted = 0

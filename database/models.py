@@ -7,7 +7,7 @@ from pydantic import (
     model_validator
 )
 from pydantic.generics import GenericModel
-from typing import Optional, List, Dict, Any, Generic, TypeVar
+from typing import Optional, List, Dict, Any, Generic, TypeVar, Literal
 import datetime
 from datetime import timezone
 import math
@@ -290,3 +290,126 @@ class TOS(TOSBase, TimestampModel):
         if 'content' in data and data.get('content') is not None:
             data['content'] = [c.to_dict() for c in self.content]
         return data
+
+# ============================================================
+# DIAGNOSTIC ASSESSMENT MODELS
+# ============================================================
+
+class DiagnosticQuestion(BaseQuestion):
+    """Question specifically for diagnostic assessments"""
+    tos_topic_title: str  # Required: Must map to TOS
+    cognitive_weight: Optional[float] = Field(default=1.0, description="Weight for scoring")
+
+class DiagnosticAssessmentBase(BaseModel):
+    subject_id: str
+    title: str
+    instructions: Optional[str] = None
+    total_items: int
+    questions: List[DiagnosticQuestion]
+    passing_score: Optional[float] = Field(default=75.0, description="Minimum score to pass")
+    time_limit_minutes: Optional[int] = Field(default=60, description="Time limit in minutes")
+
+class DiagnosticAssessment(DiagnosticAssessmentBase, TimestampModel):
+    id: str
+    def to_dict(self): 
+        data = self.model_dump(exclude_none=True)
+        if 'questions' in data:
+            data['questions'] = [q.model_dump(exclude_none=True) for q in self.questions]
+        return data
+
+
+# ============================================================
+# DIAGNOSTIC RESULT MODELS
+# ============================================================
+
+class TOSPerformance(BaseModel):
+    """Performance breakdown by TOS topic"""
+    topic_title: str
+    total_questions: int
+    correct_answers: int
+    score_percentage: float
+    bloom_breakdown: Dict[str, float]  # {"remembering": 85.0, "applying": 60.0}
+
+class DiagnosticResultBase(BaseModel):
+    user_id: str
+    assessment_id: str
+    subject_id: str
+    overall_score: float
+    passing_status: Literal["passed", "failed", "pending"]
+    time_taken_seconds: int
+    tos_performance: List[TOSPerformance]  # Breakdown by TOS topics
+    answers: Optional[Dict[str, Any]] = None  # Store student's answers
+    timestamp: Optional[str] = None
+
+class DiagnosticResult(DiagnosticResultBase, TimestampModel):
+    id: str
+    def to_dict(self): 
+        data = self.model_dump(exclude_none=True)
+        if 'tos_performance' in data:
+            data['tos_performance'] = [perf.model_dump() for perf in self.tos_performance]
+        return data
+
+
+# ============================================================
+# CONTENT VERIFICATION MODELS
+# ============================================================
+
+class ContentVerificationBase(BaseModel):
+    content_id: str  # Reference to module/quiz/assessment
+    content_type: Literal["module", "quiz", "assessment", "generated_content"]
+    verified_by: str  # Faculty user_id
+    verification_status: Literal["pending", "approved", "rejected", "needs_revision"]
+    tos_alignment_confirmed: bool = False
+    bloom_level_confirmed: bool = False
+    feedback: Optional[str] = None
+    revision_notes: Optional[str] = None
+
+class ContentVerification(ContentVerificationBase, TimestampModel):
+    id: str
+    def to_dict(self): 
+        return self.model_dump(exclude_none=True)
+
+
+# ============================================================
+# ENHANCED RECOMMENDATION MODEL
+# ============================================================
+
+class EnhancedRecommendationBase(BaseModel):
+    """Updated recommendation model that considers diagnostic results"""
+    user_id: str
+    subject_id: str
+    recommended_topic: str  # TOS topic title
+    recommended_modules: List[str]  # List of module IDs
+    recommended_quizzes: List[str]  # List of quiz IDs
+    bloom_focus: str
+    priority: Literal["high", "medium", "low"]  # Based on diagnostic weakness
+    reason: str
+    diagnostic_result_id: Optional[str] = None  # Link to diagnostic that triggered this
+    confidence: float
+    timestamp: Optional[str] = None
+
+class EnhancedRecommendation(EnhancedRecommendationBase, TimestampModel):
+    id: str
+    def to_dict(self): 
+        return self.model_dump(exclude_none=True)
+
+
+# ============================================================
+# STUDY SESSION MODEL (For realistic tracking)
+# ============================================================
+
+class StudySessionBase(BaseModel):
+    """Groups multiple activities into a single study session"""
+    user_id: str
+    subject_id: str
+    session_type: Literal["diagnostic", "review", "practice", "mock_exam"]
+    activity_ids: List[str]  # References to activities completed in this session
+    duration_seconds: int
+    avg_score: Optional[float] = None
+    completion_status: Literal["completed", "in_progress", "abandoned"]
+    timestamp: Optional[str] = None
+
+class StudySession(StudySessionBase, TimestampModel):
+    id: str
+    def to_dict(self): 
+        return self.model_dump(exclude_none=True)

@@ -2,7 +2,8 @@
 from .generic_service import FirestoreModelService
 from database.models import (
     Activity, Module, Quiz, Recommendation, Assessment, TOS, UserProfileModel,
-    GeneratedSummary, GeneratedQuiz, GeneratedFlashcards  # --- NEW ---
+    GeneratedSummary, GeneratedQuiz, GeneratedFlashcards,  # --- NEW ---
+    DiagnosticAssessment, DiagnosticResult, EnhancedRecommendation
 )
 
 # --- Create one service instance for each model ---
@@ -59,4 +60,19 @@ generated_quiz_service = FirestoreModelService(
 generated_flashcards_service = FirestoreModelService(
     collection_name="generated_flashcards",
     model=GeneratedFlashcards
+)
+
+diagnostic_service = FirestoreModelService(
+    collection_name="diagnostic_assessments",
+    model=DiagnosticAssessment
+)
+
+diagnostic_result_service = FirestoreModelService(
+    collection_name="diagnostic_results",
+    model=DiagnosticResult
+)
+
+enhanced_recommendation_service = FirestoreModelService(
+    collection_name="enhanced_recommendations",
+    model=EnhancedRecommendation
 )

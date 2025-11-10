@@ -15,6 +15,9 @@ sys.path.append(str(BASE_DIR))
 from core.firebase import db
 from .config import *
 
+# --- IMPORT FIREBASE ADMIN AUTH ---
+from firebase_admin import auth
+
 # This imports the actual models from your app to ensure data is correct
 from database.models import (
     UserProfileBase, StudentProgress, Subject, TOS, BloomEntry, 
@@ -186,10 +189,27 @@ async def populate_test_data():
 
     for student in all_students_to_create:
         student_id = student["id"]
-        
-        # Create the user profile
-        student_ref = db.collection("user_profiles").document(student_id)
         student_data_dict = {**student["data"], "role_id": real_student_role_id}
+        email = student_data_dict["email"]
+        # Use email as password for test simplicity
+        password = email 
+
+        # --- FIX: 3a. Create the Firebase Auth user first ---
+        try:
+            auth.create_user(
+                uid=student_id,
+                email=email,
+                password=password
+            )
+            print(f"✅ Created auth user: {email} (UID: {student_id})")
+        except auth.UserAlreadyExistsError:
+            print(f"ℹ️  Auth user {email} (UID: {student_id}) already exists, skipping creation.")
+        except Exception as e:
+            print(f"❌ FAILED to create auth user {email}: {e}. Skipping this student.")
+            continue # Skip to the next student
+        
+        # --- 3b. Create the user profile in Firestore ---
+        student_ref = db.collection("user_profiles").document(student_id)
         
         # Create a default progress map if it doesn't exist
         if "progress" not in student_data_dict:
@@ -203,7 +223,7 @@ async def populate_test_data():
             "deleted": False
         })
         
-        # Create all activities for this student
+        # --- 3c. Create all activities for this student ---
         num_activities = await create_student_activities(student_id, student["persona"])
         total_activities_created += num_activities
     
@@ -238,6 +258,8 @@ if __name__ == "__main__":
          sys.path.insert(0, str(BASE_DIR))
     
     from core.firebase import db
+    # --- ADD AUTH TO MAIN EXECUTION BLOCK ---
+    from firebase_admin import auth
     from database.models import (
         UserProfileBase, StudentProgress, Subject, TOS, BloomEntry, 
         SubContent, ContentSection
