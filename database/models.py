@@ -75,6 +75,8 @@ class UserProfileBase(BaseModel):
     current_module: Optional[str] = None
     progress: Optional[StudentProgress] = None
     fcm_token: Optional[str] = Field(default=None, description="Firebase Cloud Messaging device token for push notifications")
+    profile_picture: Optional[str] = Field(default=None, description="Profile picture URL")
+    
     @field_validator("ai_confidence")
     @classmethod
     def validate_confidence(cls, v: Optional[float]) -> Optional[float]:
@@ -147,6 +149,10 @@ class ModuleBase(BaseModel):
     generated_summary_id: Optional[str] = None
     generated_quiz_id: Optional[str] = None
     generated_flashcards_id: Optional[str] = None
+    cover_image_url: Optional[str] = Field(default=None, description="Module cover image URL")
+    author: Optional[str] = Field(default=None, description="Module author name")
+    short_description: Optional[str] = Field(default=None, description="Brief description")
+
 class Module(ModuleBase, TimestampModel):
     id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
@@ -157,10 +163,6 @@ class QuizBase(BaseQuestion):
 class Quiz(QuizBase, TimestampModel):
     id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
-
-
-# --- (Old Recommendation model removed) ---
-
 
 # --- AI-Generated Content Models ---
 
@@ -234,7 +236,13 @@ class GeneratedFlashcards(GeneratedFlashcardsBase, TimestampModel):
 class SubjectBase(BaseModel):
     subject_name: str
     pqf_level: Optional[int] = None
-    active_tos_id: Optional[str] = None 
+    active_tos_id: Optional[str] = None
+    description: Optional[str] = Field(default=None, description="Subject description")
+    icon_name: Optional[str] = Field(default="book", description="Icon identifier")
+    icon_color: Optional[str] = Field(default="#D8C713", description="Icon color hex")
+    icon_bg_color: Optional[str] = Field(default="#F0F5D5", description="Icon background hex")
+    card_bg_color: Optional[str] = Field(default="#FDFFB8", description="Card background hex")
+
 class Subject(SubjectBase):
     subject_id: str
     def to_dict(self): return self.model_dump(exclude_none=True)
