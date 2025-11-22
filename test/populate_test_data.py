@@ -2,14 +2,7 @@
 REALISTIC test data population for Cognify Backend.
 Based on the manuscript requirements with authentic learning patterns.
 
-UPDATED: This script now populates data for ALL major routes:
-- Subjects, TOS, DiagnosticAssessments, Modules
-- Students, DiagnosticResults
-- Quizzes (Manual)
-- Generated_Content (Summaries, Quizzes, Flashcards)
-- Recommendations (from diagnostics)
-- StudySessions (grouping activities)
-- ContentVerifications (for modules/quizzes)
+UPDATED: Now automatically creates missing ROLES with IDs matching the frontend.
 """
 
 import asyncio
@@ -35,8 +28,63 @@ from .config import (
 # --- Global counters for summary ---
 summary_counters = defaultdict(int)
 
+# --- FRONTEND MATCHING ROLE IDS ---
+# We use these specific IDs so the frontend filters (hardcoded in data.ts) work immediately.
+ROLES_DATA = [
+    {
+        "id": "PifcrriKAGM6YdWORP5I",
+        "designation": "admin",
+        "label": "Admin",
+        "description": "System Administrator with full access"
+    },
+    {
+        "id": "vhVbVsvMKiogI6rNLS7n",
+        "designation": "faculty_member",
+        "label": "Faculty Member",
+        "description": "Faculty with access to student analytics and content"
+    },
+    {
+        "id": "Tzc78QtZcaVbzFtpHoOL",
+        "designation": "student",
+        "label": "Student",
+        "description": "Student user with access to learning materials"
+    }
+]
+
 def get_iso_time():
     return datetime.now(timezone.utc).isoformat()
+
+async def ensure_roles_exist():
+    """
+    Checks if roles exist. If not, creates them with the specific IDs 
+    expected by the frontend.
+    """
+    print("\n🛡️  Checking System Roles...")
+    
+    for role in ROLES_DATA:
+        role_ref = db.collection("roles").document(role["id"])
+        doc = role_ref.get()
+        
+        if not doc.exists:
+            print(f"   ⚠️  Role '{role['designation']}' missing. Creating...")
+            role_ref.set({
+                "id": role["id"],
+                "designation": role["designation"],
+                "label": role["label"],
+                "description": role["description"],
+                "created_at": get_iso_time(),
+                "deleted": False
+            })
+            print(f"   ✅ Created role: {role['label']} ({role['id']})")
+            summary_counters["Roles Created"] += 1
+        else:
+            # Optional: Ensure designation matches if ID exists
+            current_data = doc.to_dict()
+            if current_data.get("designation") != role["designation"]:
+                print(f"   ⚠️  Role ID {role['id']} exists but mismatch. Updating...")
+                role_ref.update({"designation": role["designation"]})
+
+    print("   ✅ Roles verification complete.\n")
 
 
 def create_tos_for_subject(subject_id: str, subject_name: str):
@@ -442,14 +490,14 @@ async def populate_test_data():
     global summary_counters
     summary_counters = defaultdict(int)
     
-    student_role_id = await get_role_id_by_designation("student")
-    if not student_role_id:
-        print("❌ CRITICAL: 'student' role not found!")
-        return
+    # 1. ENSURE ROLES EXIST
+    await ensure_roles_exist()
     
-    print(f"✅ Found 'student' role. Using ID: {student_role_id}\n")
+    # Get student role (should exist now)
+    # We use the HARDCODED ID from ROLES_DATA to ensure matches
+    student_role_id = "Tzc78QtZcaVbzFtpHoOL" 
     
-    # 1. CREATE SUBJECTS, TOS, DIAGNOSTICS, MODULES, QUIZZES
+    # 2. CREATE SUBJECTS, TOS, DIAGNOSTICS, MODULES, QUIZZES
     print(f"📚 Creating {len(SUBJECTS_DATA)} Psychology subjects and all related content...")
     all_subject_content = {}
     
@@ -494,7 +542,7 @@ async def populate_test_data():
         print(f"     - TOS, Diagnostic, {len(modules)} Modules, {len(quizzes)} Quizzes")
         print(f"     - Mock AI Content & Verification Tasks")
     
-    # 2. CREATE STUDENTS
+    # 3. CREATE STUDENTS
     print(f"\n👥 Creating {len(STUDENT_PERSONAS)} realistic students...")
     for i, student in enumerate(STUDENT_PERSONAS):
         student_id = f"{TEST_PREFIX}student_{i+1:02d}"
@@ -506,7 +554,7 @@ async def populate_test_data():
             auth.create_user(uid=student_id, email=email, password=password)
             # print(f"  ✅ Created auth user: {email} (UID: {student_id})")
         except auth.EmailAlreadyExistsError:
-            print(f"  ℹ️  Auth user {email} already exists, skipping.")
+            pass # User exists, moving on
         except Exception as e:
             print(f"  ❌ Failed to create auth user {email}: {e}")
             continue
@@ -528,7 +576,7 @@ async def populate_test_data():
         summary_counters["Students"] += 1
         print(f"  ✅ {student['name']} ({student['persona']})")
     
-    # 3. GENERATE DIAGNOSTIC RESULTS, RECOMMENDATIONS, AND STUDY SESSIONS
+    # 4. GENERATE DIAGNOSTIC RESULTS, RECOMMENDATIONS, AND STUDY SESSIONS
     print("\n🧪 Generating student diagnostic results, recommendations, and study sessions...")
     
     for i, student in enumerate(STUDENT_PERSONAS):
