@@ -66,28 +66,55 @@ class LoginSchema(BaseModel):
 class UserProfileBase(BaseModel):
     email: str
     first_name: Optional[str] = None
-    middle_name: Optional[str] = None
+    middle_name: Optional[str] = None  # Already exists
     last_name: Optional[str] = None
     nickname: Optional[str] = None
+    user_name: Optional[str] = Field(
+        default=None, 
+        description="Unique username for the user (distinct from nickname)"
+    )
     role_id: Optional[str] = None
     pre_assessment_score: Optional[float] = None
     ai_confidence: Optional[float] = None
     current_module: Optional[str] = None
     progress: Optional[StudentProgress] = None
-    fcm_token: Optional[str] = Field(default=None, description="Firebase Cloud Messaging device token for push notifications")
-    profile_picture: Optional[str] = Field(default=None, description="Profile picture URL")
+    fcm_token: Optional[str] = Field(
+        default=None, 
+        description="Firebase Cloud Messaging device token for push notifications"
+    )
+    profile_picture: Optional[str] = Field(
+        default=None, 
+        description="Profile picture URL"
+    )
+    image: Optional[str] = Field(
+        default=None, 
+        description="Alternative profile image URL (alias for profile_picture)"
+    )
     
     @field_validator("ai_confidence")
     @classmethod
     def validate_confidence(cls, v: Optional[float]) -> Optional[float]:
-        if v is not None and not (0.0 <= v <= 1.0): raise ValueError("ai_confidence must be between 0.0 and 1.0")
+        if v is not None and not (0.0 <= v <= 1.0):
+            raise ValueError("ai_confidence must be between 0.0 and 1.0")
         return v
+    
+    @model_validator(mode='after')
+    def sync_image_fields(self) -> 'UserProfileBase':
+        """Ensures 'image' and 'profile_picture' are synchronized"""
+        if self.image and not self.profile_picture:
+            self.profile_picture = self.image
+        elif self.profile_picture and not self.image:
+            self.image = self.profile_picture
+        return self
+
 
 class UserProfileModel(UserProfileBase, TimestampModel):
     id: str
+    
     def to_dict(self):
         data = self.model_dump(exclude_none=True)
-        if 'progress' in data and data.get('progress') is not None: data['progress'] = self.progress.root
+        if 'progress' in data and data.get('progress') is not None:
+            data['progress'] = self.progress.root
         return data
 
 #========== Database Models (Unchanged up to Module) ==========

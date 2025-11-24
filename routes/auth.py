@@ -1,22 +1,18 @@
-# routes/auth.py
+# routes/auth.py - REFACTORED (Removed redundant models)
 import asyncio
-from fastapi import APIRouter, HTTPException, Request, status, Depends # <-- Add Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from fastapi.responses import JSONResponse
 from firebase_admin import auth
 import requests
 
-from database.models import (
-    SignUpSchema, 
-    LoginSchema, 
-    UserProfileBase
-)
+# --- IMPORT MODELS FROM database/models.py ---
+from database.models import UserProfileBase
+from pydantic import BaseModel, EmailStr
 from services import profile_service
 from services.role_service import get_role_id_by_designation
-
 from utils.firebase_utils import firebase_login_with_email
 from core.config import settings
 from core.firebase import db
-# --- 1. Import security and the new status util ---
 from core.security import verify_firebase_token
 from utils.status_utils import update_user_status 
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -26,13 +22,30 @@ COOKIE_SECURE = False
 if settings.ENVIRONMENT == "production":
     COOKIE_SAMESITE = "none"
     COOKIE_SECURE = True
-# ... (rest of cookie config is unchanged) ...
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+# --- MINIMAL AUTH MODELS (Only for password handling) ---
+class LoginSchema(BaseModel):
+    """Minimal model for login (password not stored in profile)"""
+    email: EmailStr
+    password: str
+
+class SignUpSchema(BaseModel):
+    """Signup schema - extends profile fields with password"""
+    email: EmailStr
+    password: str
+    first_name: str | None = None
+    middle_name: str | None = None
+    last_name: str | None = None
+    nickname: str | None = None
+    user_name: str | None = None
+    profile_picture: str | None = None
+    image: str | None = None
+
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup_page(auth_data: SignUpSchema):
-    # ... (this function is unchanged) ...
+    """[Public] Register a new student account"""
     
     student_role_id = await get_role_id_by_designation("student")
     if not student_role_id:
@@ -41,55 +54,68 @@ async def signup_page(auth_data: SignUpSchema):
             detail="System configuration error: 'student' role not found."
         )
 
-    # 1. Create Firebase Auth user first
+    # 1. Create Firebase Auth user
     try:
         fb_user = auth.create_user(
             email=auth_data.email, 
             password=auth_data.password
         )
     except auth.EmailAlreadyExistsError:
-        raise HTTPException(status_code=400, detail=f"Account with email {auth_data.email} already exists.")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Account with email {auth_data.email} already exists."
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # 2. If Auth user succeeds, create the Firestore profile
+    # 2. Create Firestore profile using UserProfileBase
     try:
         profile_payload = UserProfileBase(
             email=fb_user.email,
             role_id=student_role_id,
+            first_name=auth_data.first_name,
+            middle_name=auth_data.middle_name,
+            last_name=auth_data.last_name,
+            nickname=auth_data.nickname,
+            user_name=auth_data.user_name,
+            profile_picture=auth_data.profile_picture or auth_data.image,
+            image=auth_data.image or auth_data.profile_picture
         )
         
         await profile_service.create(profile_payload, doc_id=fb_user.uid)
         
-        # --- 2. ADDED: Set status to "online" on signup ---
+        # Set status to online
         await update_user_status(fb_user.uid, "online")
         
         return JSONResponse(
-            content={"message": "Successfully created user", "uid": fb_user.uid, "email": fb_user.email},
+            content={
+                "message": "Successfully created user", 
+                "uid": fb_user.uid, 
+                "email": fb_user.email
+            },
             status_code=201,
         )
     except Exception as e:
-        # --- ROLLBACK ---
+        # Rollback: Delete auth user if profile creation fails
         try:
             auth.delete_user(fb_user.uid)
         except Exception as rollback_e:
-            raise HTTPException(status_code=500, detail=f"CRITICAL: Profile creation failed, AND auth user rollback failed. {rollback_e}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"CRITICAL: Profile creation failed, AND auth rollback failed. {rollback_e}"
+            )
         raise HTTPException(status_code=400, detail=f"Failed to create profile: {e}")
-
 
 @router.post("/login")
 async def login_page(user_data: LoginSchema):
-    """
-    Handles login for ALL users.
-    Returns a REAL Firebase ID Token and Refresh Token.
-    """
+    """[Public] Login for all users (student, faculty, admin)"""
     try:
         creds = firebase_login_with_email(user_data.email, user_data.password)
         uid = creds.get("localId")
         if not uid:
             raise HTTPException(status_code=400, detail="Login failed, no UID returned.")
 
-        # ... (deleted check is unchanged) ...
+        # Check if user profile is deleted
         doc_snap = db.collection("user_profiles").document(uid).get()
         if doc_snap.exists and doc_snap.to_dict().get("deleted"):
             raise HTTPException(status_code=403, detail="User profile is deleted.")
@@ -100,7 +126,7 @@ async def login_page(user_data: LoginSchema):
         if not id_token:
             raise HTTPException(status_code=400, detail="Login failed, no ID Token returned.")
 
-        # --- 3. ADDED: Set status to "online" on login ---
+        # Set status to online
         await update_user_status(uid, "online")
 
         resp = JSONResponse(
@@ -111,7 +137,13 @@ async def login_page(user_data: LoginSchema):
             },
             status_code=200,
         )
-        resp.set_cookie(key="refresh_token", value=refresh_token, httponly=True, samesite="lax")
+        resp.set_cookie(
+            key="refresh_token", 
+            value=refresh_token, 
+            httponly=True, 
+            samesite=COOKIE_SAMESITE,
+            secure=COOKIE_SECURE
+        )
         return resp
     except HTTPException as e:
         raise e
@@ -119,17 +151,15 @@ async def login_page(user_data: LoginSchema):
         print(f"Login error: {e}")
         raise HTTPException(status_code=400, detail="Invalid email or password.")
 
-
 @router.post("/logout")
 async def logout_page(
     request: Request,
-    # --- 4. ADDED: Make this an authenticated endpoint to get UID ---
     decoded: dict = Depends(verify_firebase_token) 
 ):
+    """[Authenticated] Logout user"""
     uid = decoded.get("uid")
     if uid:
-        # --- 5. ADDED: Set status to "offline" on logout ---
-        # We don't await this, let it run in the background
+        # Set status to offline (background task)
         asyncio.create_task(update_user_status(uid, "offline"))
 
     response = JSONResponse(content={"message": "Logout successful"})
@@ -143,7 +173,7 @@ async def logout_page(
 
 @router.post("/refresh")
 async def refresh_token(request: Request):
-    # ... (this function is unchanged) ...
+    """[Public] Refresh expired ID token"""
     body = await request.json()
     refresh_tok = body.get("refresh_token") or request.cookies.get("refresh_token")
     if not refresh_tok:

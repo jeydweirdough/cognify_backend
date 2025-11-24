@@ -1,60 +1,48 @@
-# routes/profiles.py
-from fastapi import APIRouter, HTTPException, Request, Depends, Body, status
+# routes/profiles.py - REFACTORED (Removed redundant models)
+from fastapi import APIRouter, HTTPException, Request, Depends, Body, status, UploadFile, File
 from datetime import datetime
 from firebase_admin import auth as firebase_auth
+from firebase_admin import storage
 from core.firebase import db
 from core.security import allowed_users
 import asyncio
 from typing import Dict, Any, Optional, List
+import uuid
 
-# --- UPDATED IMPORTS ---
-from database.models import UserProfileBase, UserProfileModel, PaginatedResponse, BaseModel
-from pydantic import BaseModel, EmailStr, Field 
-from routes import auth
-# --- We now import the specific services we need ---
+# --- IMPORT ALL MODELS FROM database/models.py ---
+from database.models import (
+    UserProfileBase, 
+    UserProfileModel, 
+    PaginatedResponse
+)
 from services import profile_service, activity_service, recommendation_service
-# --- We also import the base class to create a temporary service ---
 from services.generic_service import FirestoreModelService 
+from pydantic import BaseModel
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 router = APIRouter(prefix="/profiles", tags=["User Profiles"])
 
-class AdminCreateUserSchema(UserProfileBase):
-    password: str
-
-class UserProfileUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    first_name: Optional[str] = None
-    middle_name: Optional[str] = None
-    last_name: Optional[str] = None
-    nickname: Optional[str] = None
-    role_id: Optional[str] = None
-    pre_assessment_score: Optional[float] = None
-    ai_confidence: Optional[float] = None
-    current_module: Optional[str] = None
-    fcm_token: Optional[str] = None
-
-# --- REMOVED THE _batch_delete_where HELPER FUNCTION ---
-# It is now part of the generic service
-
+# Helper functions remain the same
 def build_login_like_response(uid: str, email: Optional[str], token: str, refresh_token: str, profile: Dict[str, Any], message: str):
-    
     data = {"email": email, "uid": uid, "profile": profile, "message": message}
-    if token and refresh_token: data.update({"token": token, "refresh_token": refresh_token})
+    if token and refresh_token: 
+        data.update({"token": token, "refresh_token": refresh_token})
     return data
+
 def _get_auth_email(uid: str) -> Optional[str]:
-    
-    try: return firebase_auth.get_user(uid).email
-    except Exception: return None
+    try: 
+        return firebase_auth.get_user(uid).email
+    except Exception: 
+        return None
 
 @router.get("/all")
 async def get_all_profiles(
-    
     request: Request, 
     decoded=Depends(allowed_users(["admin", "faculty_member"])),
     limit: int = 20,
     start_after: Optional[str] = None
 ):
+    """[Admin/Faculty] Get all user profiles with pagination"""
     caller_role = decoded.get("role")
     
     def _fetch_profiles_and_roles_sync(limit: int, start_after: Optional[str]):
@@ -65,7 +53,8 @@ async def get_all_profiles(
         base_query = db.collection("user_profiles").where(filter=FieldFilter("deleted", "!=", True))
         
         if caller_role == "faculty_member":
-            if not student_role_id: return []
+            if not student_role_id: 
+                return []
             query = base_query.where(filter=FieldFilter("role_id", "==", student_role_id))
         else:
             query = base_query
@@ -76,15 +65,17 @@ async def get_all_profiles(
                 if start_doc.exists:
                     query = query.start_after(start_doc)
             except Exception as e:
-                 print(f"Warning: Invalid start_after document ID '{start_after}': {e}")
+                print(f"Warning: Invalid start_after document ID '{start_after}': {e}")
 
         docs = list(query.limit(limit).stream())
             
         profiles = []
         for doc in docs:
-            data = doc.to_dict(); data["id"] = doc.id
+            data = doc.to_dict()
+            data["id"] = doc.id
             auth_email = _get_auth_email(doc.id)
-            if auth_email: data["email"] = auth_email
+            if auth_email: 
+                data["email"] = auth_email
             role_id = data.get("role_id")
             data["role"] = roles_map.get(role_id, "Not Assigned")
             profiles.append(data)
@@ -98,10 +89,10 @@ async def get_all_profiles(
 
 @router.get("/", status_code=200, response_model=UserProfileModel) 
 async def get_personal_profile(
-    
     request: Request, 
     decoded=Depends(allowed_users(["student", "faculty_member", "admin"]))
 ):
+    """[All] Get the authenticated user's own profile"""
     uid = decoded.get("uid")
     profile = await profile_service.get(uid)
     if not profile:
@@ -110,14 +101,15 @@ async def get_personal_profile(
 
 @router.post("/", status_code=201, response_model=UserProfileModel)
 async def admin_create_user_and_profile(
-    
-    user_data: AdminCreateUserSchema,
+    user_data: UserProfileBase,  # ✅ USING BASE MODEL DIRECTLY
+    password: str = Body(..., embed=True),  # Password as separate field
     decoded=Depends(allowed_users(["admin"]))
 ):
+    """[Admin] Create a new user with any role"""
     try:
         fb_user = firebase_auth.create_user(
             email=user_data.email, 
-            password=user_data.password
+            password=password
         )
     except firebase_auth.EmailAlreadyExistsError:
         raise HTTPException(status_code=400, detail=f"Account with email {user_data.email} already exists.")
@@ -125,10 +117,7 @@ async def admin_create_user_and_profile(
         raise HTTPException(status_code=400, detail=f"Failed to create Firebase auth user: {e}")
 
     try:
-        profile_data = user_data.model_dump(exclude={"password"})
-        profile_data["email"] = fb_user.email
-        profile_payload = UserProfileBase(**profile_data)
-        return await profile_service.create(profile_payload, doc_id=fb_user.uid)
+        return await profile_service.create(user_data, doc_id=fb_user.uid)
     except Exception as e:
         try:
             firebase_auth.delete_user(fb_user.uid)
@@ -138,10 +127,10 @@ async def admin_create_user_and_profile(
 
 @router.get("/{user_id}", response_model=UserProfileModel)
 async def get_profile(
-    
     user_id: str, 
     decoded=Depends(allowed_users(["admin", "faculty_member"]))
 ):
+    """[Admin/Faculty] Get any user's profile"""
     profile = await profile_service.get(user_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -149,11 +138,11 @@ async def get_profile(
 
 @router.put("/{user_id}", response_model=UserProfileModel)
 async def update_profile(
-    
     user_id: str,
-    update_data: UserProfileUpdate,
+    update_data: UserProfileBase,
     decoded=Depends(allowed_users(["admin", "student", "faculty_member"]))
 ):
+    """[All] Update a user profile (users can only update their own)"""
     caller_role = decoded.get("role")
     caller_uid = decoded.get("uid")
 
@@ -173,41 +162,100 @@ async def update_profile(
         
         auth_email = _get_auth_email(user_id)
         if auth_email and updated_profile.email != auth_email:
-            return await profile_service.update(user_id, UserProfileUpdate(email=auth_email))
+            return await profile_service.update(user_id, UserProfileBase(email=auth_email))
 
         return updated_profile
     except HTTPException as e:
         raise e
 
-@router.delete("/{user_id}", response_model=UserProfileModel, dependencies=[Depends(allowed_users(["admin"]))])
+@router.delete("/{user_id}", response_model=UserProfileModel)
 async def delete_profile(
-    # ... (this is the soft delete, unchanged)
     user_id: str, 
     decoded=Depends(allowed_users(["admin"]))
 ):
+    """[Admin] Soft-delete a user profile"""
     try:
         await profile_service.delete(user_id)
         
         updated_profile = await profile_service.get(user_id, include_deleted=True)
         if not updated_profile:
-             raise HTTPException(status_code=404, detail="Profile not found after delete.")
+            raise HTTPException(status_code=404, detail="Profile not found after delete.")
         return updated_profile
     except HTTPException as e:
         raise e
 
+@router.post("/upload_profile_picture", response_model=Dict[str, str])
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    decoded=Depends(allowed_users(["admin", "student", "faculty_member"]))
+):
+    """[All Users] Upload a profile picture and auto-update profile"""
+    caller_uid = decoded.get("uid")
+    
+    try:
+        bucket = storage.bucket()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Firebase Storage bucket not configured. Error: {e}"
+        )
+    
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/jpg", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}"
+        )
+    
+    try:
+        ext = file.filename.split('.')[-1]
+        if len(ext) > 5 or len(ext) < 2:
+            ext = "jpg"
+    except:
+        ext = "jpg"
+    
+    unique_filename = f"profile_pictures/{caller_uid}_{uuid.uuid4()}.{ext}"
+    
+    try:
+        blob = bucket.blob(unique_filename)
+        blob.upload_from_file(file.file, content_type=file.content_type)
+        blob.make_public()
+        
+        # Auto-update profile with new image URL
+        update_data = UserProfileBase(
+            email="",  # Required field but won't be updated
+            profile_picture=blob.public_url,
+            image=blob.public_url
+        )
+        await profile_service.update(caller_uid, update_data)
+        
+        return {
+            "file_url": blob.public_url,
+            "message": "Profile picture uploaded and updated successfully"
+        }
+    except Exception as e:
+        print(f"Error uploading profile picture: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload: {e}")
+    finally:
+        await file.close()
+
+# Device token registration - kept as simple Pydantic model (not a profile field)
 class DeviceTokenPayload(BaseModel):
-    # ... (this class is unchanged)
-    fcm_token: str = Field(..., description="Firebase Cloud Messaging device token")
+    fcm_token: str
 
 @router.post("/register_device", status_code=status.HTTP_200_OK)
 async def register_device_token(
-    
     payload: DeviceTokenPayload,
     decoded=Depends(allowed_users(["student"]))
 ):
+    """[Student] Register device for push notifications"""
     caller_uid = decoded.get("uid")
     try:
-        update_data = UserProfileUpdate(fcm_token=payload.fcm_token)
+        update_data = UserProfileBase(
+            email="",  # Required but won't update
+            fcm_token=payload.fcm_token
+        )
         await profile_service.update(caller_uid, update_data)
         return {"message": "Device registered successfully"}
     except HTTPException as e:
@@ -216,29 +264,14 @@ async def register_device_token(
         print(f"Error registering device for {caller_uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to register device: {e}")
 
-
-# ---
-# --- THIS IS THE UPDATED ENDPOINT ---
-# ---
 @router.post("/{user_id}/purge", response_model=Dict[str, Any])
 async def purge_user_and_data(
     user_id: str,
     decoded=Depends(allowed_users(["admin"]))
 ):
-    """
-    [Admin] PERMANENTLY deletes a user and all their associated data
-    from the system. This is irreversible.
+    """[Admin] PERMANENTLY delete user and all associated data"""
     
-    This deletes:
-    1. The Firebase Auth account.
-    2. The Firestore user_profiles document.
-    3. All related 'activities'.
-    4. All related 'recommendations'.
-    5. All related 'student_motivations'.
-    """
-    
-    # 1. Delete from Firebase Authentication (The login account)
-    # ... (this part is unchanged) ...
+    # 1. Delete from Firebase Authentication
     try:
         await asyncio.to_thread(firebase_auth.delete_user, user_id)
         print(f"Successfully deleted auth user: {user_id}")
@@ -247,10 +280,10 @@ async def purge_user_and_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete auth user: {e}")
 
-    # 2. Delete the main Firestore Profile document
+    # 2. Delete the main Firestore Profile
     await profile_service.delete_permanent(user_id)
     
-    # 3. Run the cascading deletes using 'purge_where'
+    # 3. Cascade delete related data
     deleted_activities = await activity_service.purge_where(
         field="user_id", operator="==", value=user_id
     )
@@ -259,16 +292,13 @@ async def purge_user_and_data(
         field="user_id", operator="==", value=user_id
     )
     
-    # --- 4. THIS IS THE FIX ---
-    # Delete the user's document from the 'student_motivations' collection
-    # (The user_id is the document ID in this collection)
+    # 4. Delete student motivation document
     motivation_service_temp = FirestoreModelService(
-        collection_name="student_motivations", # <-- Corrected collection
+        collection_name="student_motivations",
         model=BaseModel 
     )
     motivation_doc_deleted = await motivation_service_temp.delete_permanent(user_id)
     deleted_motivations = 1 if motivation_doc_deleted else 0
-    # --- END FIX ---
 
     return {
         "message": f"User {user_id} and all related data have been purged.",
@@ -277,6 +307,6 @@ async def purge_user_and_data(
         "related_data_purged": {
             "activities": deleted_activities,
             "recommendations": deleted_recs,
-            "student_motivations": deleted_motivations # <-- Corrected key
+            "student_motivations": deleted_motivations
         }
     }
