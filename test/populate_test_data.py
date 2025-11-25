@@ -20,8 +20,163 @@ from database.models import (
     Subject, TOS, DiagnosticAssessment, Module, Quiz, 
     UserProfileModel, DiagnosticResult, Recommendation, 
     Activity, StudySession, ContentSection, SubContent, 
-    BloomEntry, StudentProgress
+    BloomEntry, StudentProgress, Assessment, Question  # Added Assessment & Question
 )
+
+# ============================================================
+# MOCK DATA (From Frontend Requirements)
+# ============================================================
+
+MOCK_ASSESSMENTS_DATA = [
+    {
+        "id": "a1",
+        "title": "Cognitive Psychology: Memory Fundamentals",
+        "description": "An introductory test on the basic models and types of human memory.",
+        "subject_id": "SUBJ_PSYCH",
+        "module_id": "MOD_COG101",
+        "purpose": "Post-Test",
+        "questions": [
+            {
+                "question_id": "q1",
+                "question": "According to the Atkinson-Shiffrin model, what is the typical capacity and duration of short-term memory?",
+                "options": ["Unlimited capacity", "Large capacity", "Limited capacity (7 ± 2 items)", "Limited capacity; unlimited duration"],
+                "answer": "Limited capacity (7 ± 2 items)",
+                "bloom_level": "remembering",
+                "topic_title": "Memory Models"
+            },
+            {
+                "question_id": "q2",
+                "question": "Which memory type stores general knowledge, facts, and concepts?",
+                "options": ["Episodic Memory", "Procedural Memory", "Semantic Memory", "Implicit Memory"],
+                "answer": "Semantic Memory",
+                "bloom_level": "understanding",
+                "topic_title": "Types of Memory"
+            }
+        ]
+    },
+    {
+        "id": "a2",
+        "title": "Theories of Personality",
+        "description": "Assessment on Freudian psychoanalysis and basic trait theories.",
+        "subject_id": "SUBJ_PSYCH",
+        "module_id": "MOD_PERS202",
+        "purpose": "Quiz",
+        "questions": [
+            {
+                "question_id": "q3",
+                "question": "In Freudian theory, the personality structure that operates on the pleasure principle is the:",
+                "options": ["Ego", "Superego", "Id"],
+                "answer": "Id",
+                "bloom_level": "remembering",
+                "topic_title": "Psychoanalysis"
+            }
+        ]
+    },
+    {
+        "id": "a3",
+        "title": "Psychological Assessment: Reliability & Validity",
+        "description": "Covers fundamental psychometric properties.",
+        "subject_id": "SUBJ_PSYC_ASSESS",
+        "module_id": "MOD_PSYCHOMETRICS101",
+        "purpose": "Diagnostic",
+        "questions": [
+            {
+                "question_id": "q4",
+                "question": "Which type of validity is conceptually required for a test to be considered truly useful?",
+                "options": ["Inter-rater Reliability", "Content Validity", "Construct Validity", "Test-retest Reliability"],
+                "answer": "Construct Validity",
+                "bloom_level": "analyzing",
+                "topic_title": "Psychometrics"
+            },
+            {
+                "question_id": "q5",
+                "question": "Comparing scores on a new measure to an existing established measure examines:",
+                "options": ["Predictive Validity", "Convergent Validity", "Discriminant Validity", "Face Validity"],
+                "answer": "Convergent Validity",
+                "bloom_level": "analyzing",
+                "topic_title": "Validity Types"
+            }
+        ]
+    },
+    {
+        "id": "a4",
+        "title": "I/O Psychology: Motivation Theories",
+        "description": "Focuses on classic need-based and process theories.",
+        "subject_id": "SUBJ_IO_PSYCH",
+        "module_id": "MOD_MOTIVATION302",
+        "purpose": "Pre-Test",
+        "questions": [
+            {
+                "question_id": "q6",
+                "question": "According to Herzberg, which is a Motivator?",
+                "options": ["Salary", "Company Policies", "Working Conditions", "Achievement"],
+                "answer": "Achievement",
+                "bloom_level": "understanding",
+                "topic_title": "Motivation Theories"
+            },
+            {
+                "question_id": "q7",
+                "question": "In Maslow's Hierarchy, Love and Belonging is preceded by:",
+                "options": ["Physiological and Safety", "Esteem", "Self-Actualization", "Growth"],
+                "answer": "Physiological and Safety",
+                "bloom_level": "understanding",
+                "topic_title": "Maslow's Hierarchy"
+            }
+        ]
+    },
+    {
+        "id": "a5",
+        "title": "Developmental Psychology: Cognitive Milestones",
+        "description": "Examines key concepts from Piaget's stages.",
+        "subject_id": "SUBJ_DEV_PSYCH",
+        "module_id": "MOD_COG_DEV205",
+        "purpose": "Quiz",
+        "questions": [
+            {
+                "question_id": "q8",
+                "question": "Difficulty understanding that a tall glass holds the same as a wide glass demonstrates lack of:",
+                "options": ["Egocentrism", "Object Permanence", "Conservation", "Abstract Reasoning"],
+                "answer": "Conservation",
+                "bloom_level": "applying",
+                "topic_title": "Piagetian Stages"
+            },
+            {
+                "question_id": "q9",
+                "question": "In which stage do children typically develop Object Permanence?",
+                "options": ["Sensorimotor", "Preoperational", "Concrete Operational", "Formal Operational"],
+                "answer": "Sensorimotor",
+                "bloom_level": "remembering",
+                "topic_title": "Piagetian Stages"
+            }
+        ]
+    },
+    {
+        "id": "a6",
+        "title": "Abnormal Psychology: Anxiety Disorders",
+        "description": "Diagnostic criteria of Generalized Anxiety Disorder (GAD).",
+        "subject_id": "SUBJ_ABNORMAL_PSYCH",
+        "module_id": "MOD_ANXIETY301",
+        "purpose": "Practice_Exam",
+        "questions": [
+            {
+                "question_id": "q10",
+                "question": "For GAD, excessive anxiety must occur more days than not for at least:",
+                "options": ["One month", "Three months", "Six months", "Twelve months"],
+                "answer": "Six months",
+                "bloom_level": "remembering",
+                "topic_title": "DSM-5 Criteria"
+            },
+            {
+                "question_id": "q11",
+                "question": "GAD is distinguished from Panic Disorder because the worry is:",
+                "options": ["Socially confined", "Focused on physical attacks", "About everyday events", "Specific to objects"],
+                "answer": "About everyday events",
+                "bloom_level": "analyzing",
+                "topic_title": "Differential Diagnosis"
+            }
+        ]
+    }
+]
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -186,7 +341,38 @@ async def populate_test_data():
             db.collection("quizzes").document(quiz_id).set(quiz_model.to_dict())
 
     # ---------------------------------------------------------
-    # 2. CREATE STUDENTS & ACTIVITY HISTORY
+    # 2. CREATE MOCK ASSESSMENTS (From Frontend Requirements)
+    # ---------------------------------------------------------
+    print("\n📝 Populating Mock Assessments...")
+    
+    for data in MOCK_ASSESSMENTS_DATA:
+        assessment_id = data["id"]
+        
+        # Construct List of Question Objects
+        questions_list = []
+        for q_data in data["questions"]:
+            questions_list.append(Question(**q_data))
+            
+        # Create Assessment Model
+        assessment = Assessment(
+            id=assessment_id,
+            title=data["title"],
+            description=data["description"],
+            subject_id=data["subject_id"],
+            module_id=data["module_id"],
+            purpose=data["purpose"],
+            questions=questions_list,
+            total_items=len(questions_list),
+            created_at=get_iso_time(),
+            updated_at=get_iso_time()
+        )
+        
+        # Save to Firestore
+        db.collection("assessments").document(assessment_id).set(assessment.to_dict())
+        print(f"   ✅ Created: {assessment.title} [{assessment.purpose}]")
+
+    # ---------------------------------------------------------
+    # 3. CREATE STUDENTS & ACTIVITY HISTORY
     # ---------------------------------------------------------
     print(f"\n👥 Creating {len(STUDENT_PERSONAS)} Students & simulating history...")
 
@@ -354,6 +540,7 @@ async def populate_test_data():
     print(f"\n✅ DONE. Populated:")
     print(f"   - {len(SUBJECTS_DATA)} Subjects with TOS")
     print(f"   - {len(SUBJECTS_DATA) * 4} Modules & Quizzes")
+    print(f"   - {len(MOCK_ASSESSMENTS_DATA)} Mock Assessments (New)")
     print(f"   - {len(STUDENT_PERSONAS)} Students with Profiles")
     print(f"   - {len(STUDENT_PERSONAS) * 2} Diagnostic Results")
     print(f"   - ~{len(STUDENT_PERSONAS) * 8} Study Sessions & Activities")

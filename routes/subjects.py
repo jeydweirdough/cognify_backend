@@ -2,15 +2,16 @@
 
 from fastapi import APIRouter, HTTPException, Depends
 from core.firebase import db
-from database.models import Subject, SubjectBase, PaginatedResponse # --- 1. Import PaginatedResponse ---
+from database.models import Subject, SubjectBase, PaginatedResponse
 import asyncio
 from datetime import datetime
-from typing import List, Optional # --- 2. Import Optional ---
-from core.security import allowed_users # --- 3. Import security ---
-from google.cloud.firestore_v1.base_query import FieldFilter # --- 4. Import FieldFilter ---
+from typing import List, Optional
+from core.security import allowed_users
+# from google.cloud.firestore_v1.base_query import FieldFilter # <--- REMOVE or COMMENT THIS
 
 router = APIRouter(prefix="/subjects", tags=["Subjects"])
 
+# ... (create_subject remains the same) ...
 @router.post("/", response_model=Subject, status_code=201)
 async def create_subject(payload: Subject):
     """
@@ -25,19 +26,22 @@ async def create_subject(payload: Subject):
         return data
     return await asyncio.to_thread(_create)
 
-# --- 5. ADD THIS NEW ENDPOINT ---
 @router.get("/", response_model=PaginatedResponse[Subject])
 async def list_subjects(
     decoded=Depends(allowed_users(["admin", "faculty_member", "student"])),
-    limit: int = 100, # Increased limit for dropdowns
+    limit: int = 100,
     start_after: Optional[str] = None
 ):
     """
-    [All Users] Lists all subjects, with pagination.
+    [All Users] Lists all subjects, with robust mapping and error handling.
     """
     def _get_all_sync():
         items = []
-        query = db.collection("subjects").where(filter=FieldFilter("deleted", "!=", True))
+        
+        # --- FIX 1: Remove Strict Filter ---
+        # Instead of filtering in the query (which hides docs missing the field),
+        # we fetch all and filter in the loop below.
+        query = db.collection("subjects")
         
         if start_after:
             try:
@@ -47,20 +51,53 @@ async def list_subjects(
             except Exception as e:
                  print(f"Warning: Invalid start_after document ID '{start_after}': {e}")
 
+        # Stream the docs
         docs = list(query.limit(limit).stream())
+        print(f"🔍 Found {len(docs)} raw documents in Firestore.") # Debug Log
             
         for doc in docs:
-            data = doc.to_dict()
-            data["subject_id"] = doc.id
-            items.append(Subject.model_validate(data))
+            try:
+                data = doc.to_dict()
+                
+                # --- FIX 2: Handle 'deleted' manually ---
+                # This allows docs NOT having the 'deleted' field to show up
+                if data.get("deleted") is True:
+                    continue
+
+                # --- FIX 3: Map IDs and Fields ---
+                # Ensure subject_id is present (from doc ID)
+                data["subject_id"] = doc.id
+
+                # Map 'name' -> 'subject_name' (Common mismatch)
+                if "name" in data and "subject_name" not in data:
+                    data["subject_name"] = data["name"]
+                
+                # Map 'code' -> 'subject_id' fallback (if needed)
+                if "code" in data and not data.get("subject_id"):
+                     data["subject_id"] = data["code"]
+
+                # Log the data before validation to debug
+                # print(f"Processing doc {doc.id}: {data}") 
+
+                # Validate
+                subject_item = Subject.model_validate(data)
+                items.append(subject_item)
+            
+            except Exception as e:
+                # --- FIX 4: Log Errors instead of Crashing ---
+                print(f"❌ Error mapping subject {doc.id}: {e}")
+                print(f"   Data: {data}")
+                continue
             
         last_doc_id = docs[-1].id if docs else None
         return items, last_doc_id
 
     items, last_id = await asyncio.to_thread(_get_all_sync)
+    
+    print(f"✅ Returning {len(items)} valid subjects.") # Debug Log
     return PaginatedResponse(items=items, last_doc_id=last_id)
-# --- END OF NEW ENDPOINT ---
 
+# ... (rest of the file: get_subject, update_subject, etc. remains the same) ...
 @router.get("/{subject_id}", response_model=Subject)
 async def get_subject(subject_id: str):
     doc = db.collection("subjects").document(subject_id).get()
@@ -86,7 +123,6 @@ async def update_subject(subject_id: str, payload: SubjectBase):
         return updated
     return await asyncio.to_thread(_update)
 
-# --- THIS IS THE KEY LOGIC ---
 @router.post("/{subject_id}/activate_tos/{tos_id}", response_model=Subject)
 async def activate_tos_version(subject_id: str, tos_id: str):
     """

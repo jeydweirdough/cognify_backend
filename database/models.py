@@ -153,9 +153,11 @@ class Question(BaseQuestion):
     question_id: str
 
 class AssessmentBase(BaseModel):
-    type: Optional[str] = None
+    purpose: Optional[str] = Field(None, description="e.g. Pre-Test, Quiz, Post-Test") # Renamed from 'type'
     subject_id: Optional[str] = None
+    module_id: Optional[str] = None # Added for linking to specific modules
     title: Optional[str] = None
+    description: Optional[str] = None # Added for short summary
     instructions: Optional[str] = None
     total_items: Optional[int] = None
     questions: Optional[List[Question]] = None
